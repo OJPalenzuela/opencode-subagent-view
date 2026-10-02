@@ -75,25 +75,32 @@ prompt keeps inserting text.
 
 ## Sidebar glance
 
-Under the sidebar's own sections the plugin lists the three subagents that
-matter most, one line each:
+Under the sidebar's own sections the plugin shows the counts header and then the
+three subagents that matter most:
 
 ```
-[✓] explore · 02:34 · 12.4k
-[ ] review · 00:12 · 3.1k
-[○] docs · 00:03 · 1.2k ⚠
+● 0 run · ✓ 30 done · ✕ 0 err
+  [✓] general · space-bunny-free
+      ↳ ⏱ 36:34  277,871 tok · 13% ctx
+  [✓] review-validator · space-bunny-free
+      ↳ ⏱ 01:22  36,169 tok · 3% ctx
 ```
 
-- **Three lines, never more.** The sidebar has no room to scroll, so this is a
-  glance; `/subagents` is the detailed view, with every subagent, the model, the
-  exact token count, the cost and the context window.
+That is the [panel's](#subagents-panel) own row format — same header, same
+two-line row, same markers, same colors, same ordering — capped at three rows
+instead of a scrollable list, and **without the cost segment** on the row. The
+sidebar and the panel render through the same code, so they cannot drift apart;
+if you see a difference between them, that is a bug.
+
+- **Three rows, never more.** The sidebar has no room to scroll, so this is a
+  glance; `/subagents` is the detailed view, with every subagent and their costs.
 - Same order as the panel: permission-pending first, then running, then the most
   recent activity. Same markers too (`●` running, `◌` idle, `✓` done, `✕`
-  failed, `⊘` interrupted, `○` unknown), bracketed and colored by state.
-- Per line: the bracketed marker, the agent label, the elapsed time, and the
-  token count abbreviated (`12.4k`). `⚠` at the end means a permission request is
-  waiting. Anything missing is left out — no time, no tokens, still a line.
-- Cost, model and context percentage belong to the panel, not here.
+  failed, `⊘` interrupted, `○` unknown).
+- `NN% ctx` is the [context window](#context-window) of that row's session. It
+  appears once the row's messages are loaded, so a fresh subagent may show the
+  row without it for a moment.
+- `⚠` at the end of a label line means a permission request is waiting.
 - Nothing is rendered when the session has no subagents: no placeholder, no
   empty block.
 
@@ -202,7 +209,7 @@ Restart the TUI after editing the config.
 | Completion alerts | Diffed per refresh; sound and notification only while blurred |
 | Alert priming | The first snapshot is a baseline, so a reload announces nothing |
 | Footer counters | `prompt.footer.status`, session id from the slot input; hidden with no session or no subagents |
-| Sidebar glance | `sidebar.content`, appended; top 3 rows of the panel's ordering, one `<text>` each, hidden when there are no subagents |
+| Sidebar glance | `sidebar.content`, appended; the panel's header plus the top 3 rows of the panel's ordering as two-line rows without the cost segment; hidden when there are no subagents |
 
 > Whether both slots are actually published inside a *subagent* session view is
 > TUI-runtime behaviour that cannot be checked from a shell. Confirm the line

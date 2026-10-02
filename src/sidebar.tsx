@@ -1,29 +1,37 @@
 /**
- * `sidebar.content`: the few subagents that need you, one line each, in the
- * space under the sidebar's own sections.
+ * `sidebar.content`: the panel's header and the panel's rows, capped at three
+ * subagents, in the space under the sidebar's own sections.
  *
- * This is the glance, not the panel. It shows the head of the panel's own
- * ordering — permission-pending first, then running, then the most recent — and
- * stops at three lines, because `/subagents` is where the rest of the detail
- * lives. Same defensive reads and the same coalesced `tick` as the panel: a
- * half-synced data layer degrades to fewer lines, never to an exception inside
- * a render.
+ * There is no format of its own here on purpose. The header is the panel's own
+ * `SubagentHeader` component and every line is `rowParts`, the row the panel
+ * draws, so the two surfaces cannot disagree about what a subagent looks like.
+ * The only difference is room: three rows instead of a scrollable list, and no
+ * cost segment (`{ cost: false }`). `/subagents` is the detailed view.
  *
- * What is synced is exactly what the ranking depends on: the widget's `⚠` and
- * its first-ranked slot both read `permission.list()`, so it asks once per
- * generation for the session and its subagents, the same ask the panel makes.
- * Transcripts and the model list are not, because the one segment they feed —
- * `NN% ctx` — does not exist in a three-line glance; paying for every
- * subagent's messages to draw a line that has no context on it would be the
- * expensive kind of wrong.
+ * Reads follow the panel: the same defensive wrappers, the same coalesced `tick`,
+ * and a half-synced data layer degrades to fewer lines, never to an exception
+ * inside a render.
+ *
+ * What is synced is exactly what is ranked or rendered. Every descendant's
+ * pending permissions, because the `⚠` and the permission-first order both come
+ * from `permission.list()`; the three displayed rows' transcripts, because
+ * `NN% ctx` is on the row now and cannot be computed without them. Both go
+ * through the shared once-per-generation helpers.
  */
 
 import type { Context } from "@opencode/plugin/tui/context";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
-import { ensureSessions } from "./context.js";
-import { collectSubagents, sidebarLine, stateOf, topRows } from "./subagents.js";
+import { ensureMessages, ensureSessions, rowPercent } from "./context.js";
+import type { ModelInfoLike } from "./context.js";
+import { SubagentHeader } from "./panel.js";
+import {
+  collectSubagents,
+  rowParts,
+  stateOf,
+  topRows,
+} from "./subagents.js";
 import type { PermissionLookup, StatusLookup, SubagentRow, SubagentSession } from "./subagents.js";
-import { MARKERS, resolveFg } from "./theme.js";
+import { MARKERS, resolveFg, SUBDUED_FALLBACK, SUBDUED_TOKEN } from "./theme.js";
 
 const ELAPSED_TICK_MS = 1_000;
 
@@ -94,6 +102,15 @@ export function resolveSidebarSession(
   }
 }
 
+/** The provider's model collection; carries the context limit, no `get` on it. */
+function safeModels(context: Context): ModelInfoLike[] {
+  try {
+    return context.data.location.model.list() ?? [];
+  } catch {
+    return [];
+  }
+}
+
 function SubagentGlance(props: {
   readonly context: Context;
   /** The slot's declared id: guaranteed by the type, not by the runtime. */
@@ -116,61 +133,79 @@ function SubagentGlance(props: {
     onCleanup(() => clearInterval(timer));
   });
 
-  // `permission.list()` is a cache read the host only fills for the session you
-  // are in, so without this a subagent blocked on a permission would answer
-  // "none": neither marked `⚠` nor ranked first on a session where the panel was
-  // never opened.
+  // Reactive on purpose: `tick()` re-arms the memo on every coalesced data
+  // event, which is what turns a newly spawned subagent into a line.
+  // Every descendant: the header counts them and the ranking orders them.
+  const all = createMemo(() => {
+    props.tick();
+    const id = sessionID();
+    // Stopping here keeps "no session" distinct from "no subagents", which is
+    // the exact distinction this widget failed to make when it first shipped.
+    if (id === undefined) return [];
+    return collectSubagents(
+      safeList(props.context),
+      id,
+      safeStatusLookup(props.context),
+      safePermissionLookup(props.context),
+    );
+  });
+
+  // The three that get drawn, each carrying the one panel field a row needs and
+  // this widget does not have on the record.
+  const rows = createMemo(() => {
+    const models = safeModels(props.context);
+    return topRows(all()).map((row) => ({
+      ...row,
+      contextPercent: rowPercent(props.context, models, row.id),
+    }));
+  });
+
+  // Permissions for every descendant, because the ranking reads them all: an
+  // unwarmed row would answer "no permission pending" and sort below a running
+  // one. Transcripts for the displayed rows only, because `NN% ctx` is the only
+  // thing that needs them, and three rows are not thirty.
   //
   // `tick()` is read here on purpose, and it is the whole reason this effect is
   // not one-shot: a subagent spawned after the widget mounted is invisible to a
   // plain cache read, and the only signal that it exists is the data event its
   // creation raises — which bumps the shared tick. Re-running on every tick is
-  // cheap because `ensureSessions` skips any id it already synced this
-  // generation, so a repeat costs one `Set` lookup per id.
+  // cheap because both helpers skip any id they already synced this generation,
+  // so a repeat costs one `Set` lookup per id.
   createEffect(() => {
     props.tick();
     const id = sessionID();
-    // No session resolved: there is no cache to warm.
     if (id === undefined) return;
-    ensureSessions(props.context, [
-      id,
-      ...collectSubagents(safeList(props.context), id).map((row) => row.id),
-    ]);
+    ensureSessions(props.context, [id, ...all().map((row) => row.id)]);
+    for (const row of rows()) ensureMessages(props.context, row.id);
   });
 
-  // Reactive on purpose: `tick()` re-arms the memo on every coalesced data
-  // event, which is what turns a newly spawned subagent into a line.
-  const rows = createMemo(() => {
-    props.tick();
-    const id = sessionID();
-    // Stopping here keeps "no session" distinct from "no subagents", which is
-    // the exact distinction this widget failed to make when it shipped.
-    if (id === undefined) return [];
-    return topRows(
-      collectSubagents(
-        safeList(props.context),
-        id,
-        safeStatusLookup(props.context),
-        safePermissionLookup(props.context),
-      ),
-    );
-  });
-
-  const line = (row: SubagentRow) => sidebarLine(row, now());
-
-  // State color, from the same `MARKERS` entry the line's marker comes from.
+  // State color, from the same `MARKERS` entry the row's marker comes from.
   const fg = (row: SubagentRow) => {
     const marker = MARKERS[stateOf(row, now())];
     return resolveFg(props.context, marker.token, marker.fallback);
   };
 
+  const subdued = () => resolveFg(props.context, SUBDUED_TOKEN, SUBDUED_FALLBACK);
+
   // No subagents means no widget: a placeholder here would leave a permanent
   // empty block in every session that has never spawned one.
   return (
-    <Show when={rows().length > 0}>
+    <Show when={all().length > 0}>
       <box flexDirection="column">
+        <SubagentHeader context={props.context} rows={all()} />
         <For each={rows()}>
-          {(row: SubagentRow) => <text fg={fg(row)}>{line(row)}</text>}
+          {(row: SubagentRow) => {
+            // `{ cost: false }` is the whole difference from a panel row.
+            const parts = () => rowParts(row, now(), { cost: false });
+            return (
+              <box flexDirection="column">
+                <text fg={fg(row)}>{parts().label}</text>
+                <Show when={parts().meta !== ""}>
+                  <text fg={subdued()}>{parts().meta}</text>
+                </Show>
+              </box>
+            );
+          }}
         </For>
       </box>
     </Show>

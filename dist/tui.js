@@ -3,7 +3,7 @@ import { createComponent as _$createComponent4 } from "@opentui/solid";
 import { effect as _$effect4 } from "@opentui/solid";
 import { memo as _$memo } from "@opentui/solid";
 import { createTextNode as _$createTextNode2 } from "@opentui/solid";
-import { insertNode as _$insertNode2 } from "@opentui/solid";
+import { insertNode as _$insertNode3 } from "@opentui/solid";
 import { insert as _$insert4 } from "@opentui/solid";
 import { setProp as _$setProp4 } from "@opentui/solid";
 import { createElement as _$createElement4 } from "@opentui/solid";
@@ -414,7 +414,7 @@ function headerSegment(noun, state, count) {
   const marker = MARKERS[state];
   return { text: `${marker.glyph} ${count} ${noun}`, token: marker.token, fallback: marker.fallback };
 }
-function rowParts(row, now) {
+function rowParts(row, now, options) {
   const state = stateOf(row, now);
   const depth = Math.max(0, row.depth - 1);
   const current = row.isCurrent ? CURRENT_GLYPH : " ";
@@ -428,22 +428,12 @@ function rowParts(row, now) {
     tokenCount === void 0 || tokenCount <= 0 ? "" : `${formatExactTokens(tokenCount)} tok`
   ].filter((part) => part !== "").join("  ");
   const rest = [];
-  if (row.cost !== void 0 && row.cost > 0) rest.push(formatCost(row.cost));
+  if (row.cost !== void 0 && row.cost > 0 && options?.cost !== false) rest.push(formatCost(row.cost));
   const percent = finite(row.contextPercent);
   if (percent !== void 0) rest.push(`${formatPercent(percent)}% ctx`);
   const segments = head === "" ? rest : [head, ...rest];
   const metaLine = segments.length === 0 ? "" : `${" ".repeat(LABEL_COLUMN + INDENT.length * depth)}\u21B3 ${segments.join(SEPARATOR3)}`;
   return { state, label: labelLine, meta: metaLine };
-}
-function sidebarLine(row, now) {
-  const elapsed = elapsedMs(row, now);
-  const tokens = finite(row.tokens);
-  const head = `${MARKERS[stateOf(row, now)].bracketed} ${row.label}`;
-  const metrics = [
-    elapsed === void 0 ? "" : formatDuration(elapsed),
-    tokens === void 0 || tokens <= 0 ? "" : formatTokens(tokens)
-  ].filter((segment) => segment !== "");
-  return `${[head, ...metrics].join(SEPARATOR3)}${row.needsPermission ? ` ${PERMISSION_GLYPH}` : ""}`;
 }
 function headerSegments(total) {
   return [
@@ -502,10 +492,10 @@ function registerFooter(context, tick) {
 }
 
 // src/panel.tsx
+import { use as _$use } from "@opentui/solid";
 import { effect as _$effect2 } from "@opentui/solid";
 import { createTextNode as _$createTextNode } from "@opentui/solid";
 import { insertNode as _$insertNode } from "@opentui/solid";
-import { use as _$use } from "@opentui/solid";
 import { insert as _$insert2 } from "@opentui/solid";
 import { createComponent as _$createComponent2 } from "@opentui/solid";
 import { setProp as _$setProp2 } from "@opentui/solid";
@@ -556,6 +546,35 @@ function safeModels(context) {
   } catch {
     return [];
   }
+}
+function SubagentHeader(props) {
+  const segments = createMemo2(() => headerSegments(counts(props.rows)));
+  return (() => {
+    var _el$ = _$createElement2("box");
+    _$setProp2(_el$, "flexDirection", "row");
+    _$insert2(_el$, _$createComponent2(For, {
+      get each() {
+        return segments();
+      },
+      children: (segment, index) => [_$createComponent2(Show2, {
+        get when() {
+          return index() > 0;
+        },
+        get children() {
+          var _el$2 = _$createElement2("text");
+          _$insertNode(_el$2, _$createTextNode(` \xB7 `));
+          _$effect2((_$p) => _$setProp2(_el$2, "fg", resolveFg(props.context, SUBDUED_TOKEN, SUBDUED_FALLBACK), _$p));
+          return _el$2;
+        }
+      }), (() => {
+        var _el$4 = _$createElement2("text");
+        _$insert2(_el$4, () => segment.text);
+        _$effect2((_$p) => _$setProp2(_el$4, "fg", resolveFg(props.context, segment.token, segment.fallback), _$p));
+        return _el$4;
+      })()]
+    }));
+    return _el$;
+  })();
 }
 function SubagentPanel(props) {
   const {
@@ -664,8 +683,6 @@ function SubagentPanel(props) {
     }]
   }));
   const subdued = () => resolveFg(context, SUBDUED_TOKEN, SUBDUED_FALLBACK);
-  const header = createMemo2(() => headerSegments(counts(rows())));
-  const headerFg = (segment) => resolveFg(context, segment.token, segment.fallback);
   const rowFg = (row, state, index) => {
     if (index === Math.min(cursor(), lastIndex())) {
       return resolveFg(context, SELECTED_TOKEN, SELECTED_FALLBACK);
@@ -675,33 +692,16 @@ function SubagentPanel(props) {
     return resolveFg(context, marker.token, marker.fallback);
   };
   return (() => {
-    var _el$ = _$createElement2("box"), _el$2 = _$createElement2("box"), _el$4 = _$createElement2("text");
-    _$insertNode(_el$, _el$2);
-    _$insertNode(_el$, _el$4);
-    _$setProp2(_el$, "flexDirection", "column");
-    _$setProp2(_el$2, "flexDirection", "row");
-    _$insert2(_el$2, _$createComponent2(For, {
-      get each() {
-        return header();
-      },
-      children: (segment, index) => [_$createComponent2(Show2, {
-        get when() {
-          return index() > 0;
-        },
-        get children() {
-          var _el$6 = _$createElement2("text");
-          _$insertNode(_el$6, _$createTextNode(` \xB7 `));
-          _$effect2((_$p) => _$setProp2(_el$6, "fg", subdued(), _$p));
-          return _el$6;
-        }
-      }), (() => {
-        var _el$8 = _$createElement2("text");
-        _$insert2(_el$8, () => segment.text);
-        _$effect2((_$p) => _$setProp2(_el$8, "fg", headerFg(segment), _$p));
-        return _el$8;
-      })()]
-    }));
-    _$insert2(_el$, _$createComponent2(Show2, {
+    var _el$5 = _$createElement2("box"), _el$7 = _$createElement2("text");
+    _$insertNode(_el$5, _el$7);
+    _$setProp2(_el$5, "flexDirection", "column");
+    _$insert2(_el$5, _$createComponent2(SubagentHeader, {
+      context,
+      get rows() {
+        return rows();
+      }
+    }), _el$7);
+    _$insert2(_el$5, _$createComponent2(Show2, {
       get when() {
         return rows().length > 0;
       },
@@ -714,13 +714,13 @@ function SubagentPanel(props) {
         })();
       },
       get children() {
-        var _el$3 = _$createElement2("box");
-        _$use(setViewport, _el$3);
-        _$setProp2(_el$3, "flexDirection", "column");
-        _$setProp2(_el$3, "flexShrink", 1);
-        _$setProp2(_el$3, "maxHeight", "100%");
-        _$setProp2(_el$3, "overflow", "hidden");
-        _$insert2(_el$3, _$createComponent2(For, {
+        var _el$6 = _$createElement2("box");
+        _$use(setViewport, _el$6);
+        _$setProp2(_el$6, "flexDirection", "column");
+        _$setProp2(_el$6, "flexShrink", 1);
+        _$setProp2(_el$6, "maxHeight", "100%");
+        _$setProp2(_el$6, "overflow", "hidden");
+        _$insert2(_el$6, _$createComponent2(For, {
           get each() {
             return shown();
           },
@@ -748,12 +748,12 @@ function SubagentPanel(props) {
             })();
           }
         }));
-        return _el$3;
+        return _el$6;
       }
-    }), _el$4);
-    _$insertNode(_el$4, _$createTextNode(`j/k move \xB7 enter open \xB7 c completed \xB7 f fullscreen \xB7 esc close`));
-    _$effect2((_$p) => _$setProp2(_el$4, "fg", subdued(), _$p));
-    return _el$;
+    }), _el$7);
+    _$insertNode(_el$7, _$createTextNode(`j/k move \xB7 enter open \xB7 c completed \xB7 f fullscreen \xB7 esc close`));
+    _$effect2((_$p) => _$setProp2(_el$7, "fg", subdued(), _$p));
+    return _el$5;
   })();
 }
 function registerPanel(context, tick) {
@@ -775,6 +775,7 @@ function registerPanel(context, tick) {
 }
 
 // src/sidebar.tsx
+import { insertNode as _$insertNode2 } from "@opentui/solid";
 import { effect as _$effect3 } from "@opentui/solid";
 import { insert as _$insert3 } from "@opentui/solid";
 import { createComponent as _$createComponent3 } from "@opentui/solid";
@@ -820,6 +821,13 @@ function resolveSidebarSession(slotSessionID, readRoute) {
     return void 0;
   }
 }
+function safeModels2(context) {
+  try {
+    return context.data.location.model.list() ?? [];
+  } catch {
+    return [];
+  }
+}
 function SubagentGlance(props) {
   const [now, setNow] = createSignal2(Date.now());
   const sessionID = () => resolveSidebarSession(props.slotSessionID, () => props.context.ui.router.current());
@@ -827,41 +835,75 @@ function SubagentGlance(props) {
     const timer = setInterval(() => setNow(Date.now()), ELAPSED_TICK_MS2);
     onCleanup2(() => clearInterval(timer));
   });
+  const all = createMemo3(() => {
+    props.tick();
+    const id = sessionID();
+    if (id === void 0) return [];
+    return collectSubagents(safeList3(props.context), id, safeStatusLookup2(props.context), safePermissionLookup2(props.context));
+  });
+  const rows = createMemo3(() => {
+    const models = safeModels2(props.context);
+    return topRows(all()).map((row) => ({
+      ...row,
+      contextPercent: rowPercent(props.context, models, row.id)
+    }));
+  });
   createEffect2(() => {
     props.tick();
     const id = sessionID();
     if (id === void 0) return;
-    ensureSessions(props.context, [id, ...collectSubagents(safeList3(props.context), id).map((row) => row.id)]);
+    ensureSessions(props.context, [id, ...all().map((row) => row.id)]);
+    for (const row of rows()) ensureMessages(props.context, row.id);
   });
-  const rows = createMemo3(() => {
-    props.tick();
-    const id = sessionID();
-    if (id === void 0) return [];
-    return topRows(collectSubagents(safeList3(props.context), id, safeStatusLookup2(props.context), safePermissionLookup2(props.context)));
-  });
-  const line = (row) => sidebarLine(row, now());
   const fg = (row) => {
     const marker = MARKERS[stateOf(row, now())];
     return resolveFg(props.context, marker.token, marker.fallback);
   };
+  const subdued = () => resolveFg(props.context, SUBDUED_TOKEN, SUBDUED_FALLBACK);
   return _$createComponent3(Show3, {
     get when() {
-      return rows().length > 0;
+      return all().length > 0;
     },
     get children() {
       var _el$ = _$createElement3("box");
       _$setProp3(_el$, "flexDirection", "column");
+      _$insert3(_el$, _$createComponent3(SubagentHeader, {
+        get context() {
+          return props.context;
+        },
+        get rows() {
+          return all();
+        }
+      }), null);
       _$insert3(_el$, _$createComponent3(For2, {
         get each() {
           return rows();
         },
-        children: (row) => (() => {
-          var _el$2 = _$createElement3("text");
-          _$insert3(_el$2, () => line(row));
-          _$effect3((_$p) => _$setProp3(_el$2, "fg", fg(row), _$p));
-          return _el$2;
-        })()
-      }));
+        children: (row) => {
+          const parts = () => rowParts(row, now(), {
+            cost: false
+          });
+          return (() => {
+            var _el$2 = _$createElement3("box"), _el$3 = _$createElement3("text");
+            _$insertNode2(_el$2, _el$3);
+            _$setProp3(_el$2, "flexDirection", "column");
+            _$insert3(_el$3, () => parts().label);
+            _$insert3(_el$2, _$createComponent3(Show3, {
+              get when() {
+                return parts().meta !== "";
+              },
+              get children() {
+                var _el$4 = _$createElement3("text");
+                _$insert3(_el$4, () => parts().meta);
+                _$effect3((_$p) => _$setProp3(_el$4, "fg", subdued(), _$p));
+                return _el$4;
+              }
+            }), null);
+            _$effect3((_$p) => _$setProp3(_el$3, "fg", fg(row), _$p));
+            return _el$2;
+          })();
+        }
+      }), null);
       return _el$;
     }
   });
@@ -908,7 +950,7 @@ function safeList4(context) {
     return [];
   }
 }
-function safeModels2(context) {
+function safeModels3(context) {
   try {
     return context.data.location.model.list() ?? [];
   } catch {
@@ -975,7 +1017,7 @@ function SubagentStatus(props) {
     ...record(),
     // `undefined` until both lists hold a usable pair, which is what drops
     // the segment instead of printing a misleading `0% ctx`.
-    contextPercent: rowPercent(props.context, safeModels2(props.context), props.sessionID)
+    contextPercent: rowPercent(props.context, safeModels3(props.context), props.sessionID)
   }, now(), safeStatus(props.context, props.sessionID)));
   const marker = () => MARKERS[summary().state];
   return _$createComponent4(Show4, {
@@ -984,12 +1026,12 @@ function SubagentStatus(props) {
     },
     get children() {
       var _el$ = _$createElement4("box"), _el$2 = _$createElement4("text"), _el$3 = _$createElement4("text"), _el$4 = _$createTextNode2(` `), _el$5 = _$createElement4("text");
-      _$insertNode2(_el$, _el$2);
-      _$insertNode2(_el$, _el$3);
-      _$insertNode2(_el$, _el$5);
+      _$insertNode3(_el$, _el$2);
+      _$insertNode3(_el$, _el$3);
+      _$insertNode3(_el$, _el$5);
       _$setProp4(_el$, "flexDirection", "row");
       _$insert4(_el$2, () => marker().glyph);
-      _$insertNode2(_el$3, _el$4);
+      _$insertNode3(_el$3, _el$4);
       _$insert4(_el$3, () => summary().label, null);
       _$insert4(_el$5, (() => {
         var _c$ = _$memo(() => !!summary().text);

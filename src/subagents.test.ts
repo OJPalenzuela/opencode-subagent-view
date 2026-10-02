@@ -9,7 +9,6 @@ import {
   rowCapacity,
   rowParts,
   rowWindow,
-  sidebarLine,
   SIDEBAR_LIMIT,
   stateOf,
   topRows,
@@ -400,83 +399,50 @@ describe("rowParts", () => {
   });
 });
 
-describe("sidebarLine", () => {
-  it("renders marker, label, elapsed and compact tokens", () => {
-    const line = sidebarLine(
-      row({
-        label: "explore",
-        outcome: "succeeded",
-        tokens: 12_400,
-        time: { created: T0, updated: T0 + 154_000 },
-      }),
-      T0 + 154_000,
+describe("rowParts cost option", () => {
+  const COSTED = {
+    label: "general",
+    model: "space-bunny-free",
+    cost: 0.04,
+    tokens: 277_871,
+    contextPercent: 13,
+    outcome: "succeeded" as const,
+    time: { created: T0, updated: T0 + 2_194_000 },
+  };
+
+  it("keeps the cost when no options are passed", () => {
+    expect(rowParts(row(COSTED), T0 + 2_194_000).meta).toBe(
+      "      ↳ ⏱ 36:34  277,871 tok · $0.04 · 13% ctx",
     );
-    expect(line).toBe("[✓] explore · 02:34 · 12.4k");
   });
 
-  it("brackets the marker of every state, exactly as the panel does", () => {
-    const cases: readonly (readonly [Partial<SubagentRow>, string])[] = [
-      [{ status: "running" }, "review"],
-      [{ status: "idle" }, "docs"],
-      [{ outcome: "succeeded" }, "build"],
-      [{ outcome: "failed" }, "build"],
-      [{ outcome: "interrupted" }, "build"],
-      [{}, "plan"],
-    ];
-    for (const [overrides, label] of cases) {
-      expect(sidebarLine(row({ label, ...overrides }), T0)).toBe(`${MARKERS[stateOf(row(overrides), T0)].bracketed} ${label}`);
-    }
-  });
-
-  it("omits the elapsed when the row has no time, keeping the rest", () => {
-    expect(sidebarLine(row({ label: "docs", tokens: 3_100 }), T0)).toBe("[○] docs · 3.1k");
-  });
-
-  it("omits zero and non-finite token counts instead of printing 0", () => {
-    expect(sidebarLine(row({ label: "docs", tokens: 0 }), T0)).toBe("[○] docs");
-    for (const tokens of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
-      expect(sidebarLine(row({ label: "docs", tokens }), T0)).toBe("[○] docs");
-    }
-  });
-
-  it("ends with the permission marker when one is waiting", () => {
-    const line = sidebarLine(
-      row({
-        label: "docs",
-        status: "running",
-        needsPermission: true,
-        tokens: 1_200,
-        time: { created: T0, updated: T0 },
-      }),
-      T0 + 3_000,
+  it("keeps the cost for an empty options object", () => {
+    expect(rowParts(row(COSTED), T0 + 2_194_000, {}).meta).toBe(
+      "      ↳ ⏱ 36:34  277,871 tok · $0.04 · 13% ctx",
     );
-    expect(line).toBe("[ ] docs · 00:03 · 1.2k ⚠");
   });
 
-  it("keeps marker and label when the row has no metrics at all", () => {
-    expect(sidebarLine(row({ label: "plan" }), T0)).toBe("[○] plan");
-  });
-
-  it("keeps the running clock moving and freezes it once the outcome is set", () => {
-    const running = row({ label: "review", time: { created: T0, updated: T0 } });
-    expect(sidebarLine(running, T0 + 60_000)).toBe("[○] review · 01:00");
-    const done = row({ label: "review", outcome: "succeeded", time: { created: T0, updated: T0 + 900_000 } });
-    expect(sidebarLine(done, T0 + 3_600_000)).toBe("[✓] review · 15:00");
-  });
-
-  it("leaves the model, cost and context percentage to the panel", () => {
-    const line = sidebarLine(
-      row({
-        label: "explore",
-        model: "claude-sonnet-4-6",
-        cost: 0.04,
-        contextPercent: 37,
-        tokens: 12_400,
-        time: { created: T0, updated: T0 + 1 },
-      }),
-      T0 + 1,
+  it("drops only the cost when it is switched off", () => {
+    expect(rowParts(row(COSTED), T0 + 2_194_000, { cost: false }).meta).toBe(
+      "      ↳ ⏱ 36:34  277,871 tok · 13% ctx",
     );
-    expect(line).toBe("[○] explore · 00:00 · 12.4k");
+  });
+
+  it("leaves the label line untouched when the cost is switched off", () => {
+    const parts = rowParts(row(COSTED), T0 + 2_194_000, { cost: false });
+    expect(parts.label).toBe("  [✓] general · space-bunny-free");
+    expect(parts.state).toBe("done");
+  });
+
+  it("renders no meta line at all when a suppressed cost was the only metric", () => {
+    expect(rowParts(row({ label: "plan", cost: 0.04 }), T0, { cost: false }).meta).toBe("");
+    expect(rowParts(row({ label: "plan", cost: 0.04 }), T0).meta).toBe("      ↳ $0.04");
+  });
+
+  it("keeps the permission marker on the label line either way", () => {
+    const pending = row({ label: "docs", needsPermission: true, cost: 0.04 });
+    expect(rowParts(pending, T0, { cost: false }).label).toBe("  [○] docs ⚠");
+    expect(rowParts(pending, T0, { cost: false }).meta).toBe("");
   });
 });
 

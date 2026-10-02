@@ -25,7 +25,6 @@ import {
   visibleRows,
 } from "./subagents.js";
 import type {
-  HeaderSegment,
   PermissionLookup,
   StatusLookup,
   SubagentRow,
@@ -100,6 +99,35 @@ function safeModels(context: Context): ModelInfoLike[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * The counts header — `● 2 run · ✓ 1 done · ✕ 0 err` — one colour per count.
+ *
+ * Exported and shared with the sidebar widget rather than copied into it: both
+ * surfaces count the same rows with the same selector, and a second copy of this
+ * markup is exactly how the two would drift apart.
+ */
+export function SubagentHeader(props: {
+  readonly context: Context;
+  readonly rows: readonly SubagentRow[];
+}) {
+  const segments = createMemo(() => headerSegments(counts(props.rows)));
+
+  return (
+    <box flexDirection="row">
+      <For each={segments()}>
+        {(segment, index) => (
+          <>
+            <Show when={index() > 0}>
+              <text fg={resolveFg(props.context, SUBDUED_TOKEN, SUBDUED_FALLBACK)}> · </text>
+            </Show>
+            <text fg={resolveFg(props.context, segment.token, segment.fallback)}>{segment.text}</text>
+          </>
+        )}
+      </For>
+    </box>
+  );
 }
 
 function SubagentPanel(props: {
@@ -255,10 +283,6 @@ function SubagentPanel(props: {
 
   const subdued = () => resolveFg(context, SUBDUED_TOKEN, SUBDUED_FALLBACK);
 
-  const header = createMemo(() => headerSegments(counts(rows())));
-
-  const headerFg = (segment: HeaderSegment) => resolveFg(context, segment.token, segment.fallback);
-
   const rowFg = (row: SubagentRow, state: State, index: number) => {
     if (index === Math.min(cursor(), lastIndex())) {
       return resolveFg(context, SELECTED_TOKEN, SELECTED_FALLBACK);
@@ -270,18 +294,7 @@ function SubagentPanel(props: {
 
   return (
     <box flexDirection="column">
-      <box flexDirection="row">
-        <For each={header()}>
-          {(segment, index) => (
-            <>
-              <Show when={index() > 0}>
-                <text fg={subdued()}> · </text>
-              </Show>
-              <text fg={headerFg(segment)}>{segment.text}</text>
-            </>
-          )}
-        </For>
-      </box>
+      <SubagentHeader context={context} rows={rows()} />
       <Show
         when={rows().length > 0}
         fallback={<text fg={subdued()}>No subagents in this session</text>}

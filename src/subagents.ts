@@ -16,7 +16,6 @@ import {
   formatDuration,
   formatExactTokens,
   formatPercent,
-  formatTokens,
 } from "./format.js";
 import type { Outcome, SessionLike, SessionStatus, SessionTime, State } from "./format.js";
 import { CURRENT_GLYPH, MARKERS, PERMISSION_GLYPH } from "./theme.js";
@@ -295,6 +294,16 @@ export interface RowParts {
   readonly meta: string;
 }
 
+/**
+ * The one knob a caller has on a row. The panel and the sidebar render the same
+ * row, and the only difference between them is room: the sidebar has three lines,
+ * so it asks for the row without its cost segment.
+ */
+export interface RowPartsOptions {
+  /** Render the cost segment. Default `true`. */
+  readonly cost?: boolean;
+}
+
 /** One header count plus the token that colors it. */
 export interface HeaderSegment {
   readonly text: string;
@@ -313,7 +322,7 @@ function headerSegment(noun: string, state: State, count: number): HeaderSegment
  * the label. The permission marker stays on the label line: it is a state
  * signal, not a metric.
  */
-export function rowParts(row: SubagentRow, now: number): RowParts {
+export function rowParts(row: SubagentRow, now: number, options?: RowPartsOptions): RowParts {
   const state = stateOf(row, now);
   const depth = Math.max(0, row.depth - 1);
 
@@ -334,7 +343,9 @@ export function rowParts(row: SubagentRow, now: number): RowParts {
   ].filter((part) => part !== "").join("  ");
 
   const rest: string[] = [];
-  if (row.cost !== undefined && row.cost > 0) rest.push(formatCost(row.cost));
+  // `cost: false` drops one segment and nothing else, so a row that had nothing
+  // but a cost ends up with no meta line at all.
+  if (row.cost !== undefined && row.cost > 0 && options?.cost !== false) rest.push(formatCost(row.cost));
   // Last segment, same position as the status line's: occupancy is the
   // freshest number on the row.
   const percent = finite(row.contextPercent);
@@ -348,30 +359,6 @@ export function rowParts(row: SubagentRow, now: number): RowParts {
     : `${" ".repeat(LABEL_COLUMN + INDENT.length * depth)}↳ ${segments.join(SEPARATOR)}`;
 
   return { state, label: labelLine, meta: metaLine };
-}
-
-/**
- * One subagent as one line: `[✓] explore · 02:34 · 12.4k`.
- *
- * The sidebar's whole budget per subagent. Same `bracketed` marker as the panel
- * row, elapsed without the `⏱` (there is no room for the icon), and tokens
- * abbreviated instead of exact, since the panel is the view that has the width
- * to be precise. Missing data is omitted rather than filled: a row with no time
- * and no tokens is still its marker and its label. `⚠` stays last, as on the
- * panel's label line — a state signal, not a metric.
- */
-export function sidebarLine(row: SubagentRow, now: number): string {
-  const elapsed = elapsedMs(row, now);
-  const tokens = finite(row.tokens);
-  // The marker labels the subagent, so it is separated by a space; the metrics
-  // are a list of their own and carry the shared separator. `⚠` hangs off the
-  // end with a space, as on the panel's label line.
-  const head = `${MARKERS[stateOf(row, now)].bracketed} ${row.label}`;
-  const metrics = [
-    elapsed === undefined ? "" : formatDuration(elapsed),
-    tokens === undefined || tokens <= 0 ? "" : formatTokens(tokens),
-  ].filter((segment) => segment !== "");
-  return `${[head, ...metrics].join(SEPARATOR)}${row.needsPermission ? ` ${PERMISSION_GLYPH}` : ""}`;
 }
 
 /** Header counts as three separately colored segments: `● 2 run`, `✓ 1 done`, `✕ 0 err`. */
