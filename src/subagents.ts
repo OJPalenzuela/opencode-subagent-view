@@ -14,8 +14,8 @@ import {
   finite,
   formatCost,
   formatDuration,
+  formatExactTokens,
   formatPercent,
-  formatTokens,
 } from "./format.js";
 import type { Outcome, SessionLike, SessionStatus, SessionTime, State } from "./format.js";
 import { CURRENT_GLYPH, MARKERS, PERMISSION_GLYPH } from "./theme.js";
@@ -216,35 +216,93 @@ export function counts(rows: readonly SubagentRow[]): SubagentCounts {
 }
 
 const INDENT = "  ";
+const SEPARATOR = " · ";
+/**
+ * Columns the label starts at — `› ` plus `[x] ` — so the meta line lands
+ * directly under the label of the same row.
+ */
+const LABEL_COLUMN = 6;
 
-/** `› ● explore · model · ⏱ 02:34 · 12.4k tok · $0.04 · 37% ctx ⚠` */
-export function rowLine(row: SubagentRow, now: number): string {
-  const parts: string[] = [];
-  if (row.model) parts.push(row.model);
+/**
+ * A row as two lines instead of one string: the panel needs separate nodes to
+ * give the label its state color and the metrics a single subdued one.
+ *
+ * `state` is what the label line is colored from, returned by the same call
+ * that built the line so the two cannot disagree.
+ */
+export interface RowParts {
+  readonly state: State;
+  readonly label: string;
+  /** `""` when the row has no metric at all, so the panel prints one line. */
+  readonly meta: string;
+}
+
+/** One header count plus the token that colors it. */
+export interface HeaderSegment {
+  readonly text: string;
+  readonly token: string;
+  readonly fallback: string;
+}
+
+function headerSegment(noun: string, state: State, count: number): HeaderSegment {
+  const marker = MARKERS[state];
+  return { text: `${marker.glyph} ${count} ${noun}`, token: marker.token, fallback: marker.fallback };
+}
+
+/**
+ * The row's two lines: a state-colored `› [✓] explore · model` label line, and a
+ * subdued `↳ ⏱ 02:34  19,212 tok · $0.04 · 37% ctx` metrics line indented under
+ * the label. The permission marker stays on the label line: it is a state
+ * signal, not a metric.
+ */
+export function rowParts(row: SubagentRow, now: number): RowParts {
+  const state = stateOf(row, now);
+  const depth = Math.max(0, row.depth - 1);
+
+  const current = row.isCurrent ? CURRENT_GLYPH : " ";
+  const label = row.model ? `${row.label}${SEPARATOR}${row.model}` : row.label;
+  const pending = row.needsPermission ? ` ${PERMISSION_GLYPH}` : "";
+  const labelLine = `${current} ${MARKERS[state].bracketed} ${INDENT.repeat(depth)}${label}${pending}`;
 
   const elapsed = elapsedMs(row, now);
-  if (elapsed !== undefined) parts.push(`⏱ ${formatDuration(elapsed)}`);
+  // Elapsed and tokens lead the line and carry the wider gap; whatever else
+  // exists joins with the shared separator.
+  const head = [
+    elapsed === undefined ? "" : `⏱ ${formatDuration(elapsed)}`,
+    row.tokens === undefined || row.tokens <= 0 ? "" : `${formatExactTokens(row.tokens)} tok`,
+  ].filter((part) => part !== "").join("  ");
 
-  if (row.tokens !== undefined && row.tokens > 0) parts.push(`${formatTokens(row.tokens)} tok`);
-  if (row.cost !== undefined && row.cost > 0) parts.push(formatCost(row.cost));
-
+  const rest: string[] = [];
+  if (row.cost !== undefined && row.cost > 0) rest.push(formatCost(row.cost));
   // Last segment, same position as the status line's: occupancy is the
   // freshest number on the row.
   const percent = finite(row.contextPercent);
-  if (percent !== undefined) parts.push(`${formatPercent(percent)}% ctx`);
+  if (percent !== undefined) rest.push(`${formatPercent(percent)}% ctx`);
 
-  const current = row.isCurrent ? CURRENT_GLYPH : " ";
-  const glyph = MARKERS[stateOf(row, now)].glyph;
-  const indent = INDENT.repeat(Math.max(0, row.depth - 1));
-  const meta = parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
-  const pending = row.needsPermission ? ` ${PERMISSION_GLYPH}` : "";
+  // `↳` leads the line, so the first segment carries it whether it is the head
+  // or a cost/occupancy the row has no clock or tokens for.
+  const segments = head === "" ? rest : [head, ...rest];
+  const metaLine = segments.length === 0
+    ? ""
+    : `${" ".repeat(LABEL_COLUMN + INDENT.length * depth)}↳ ${segments.join(SEPARATOR)}`;
 
-  return `${current} ${glyph} ${indent}${row.label}${meta}${pending}`;
+  return { state, label: labelLine, meta: metaLine };
 }
 
-/** Header counts line: `Subagents  2 run · 1 done · 0 err`. */
+/** Header counts as three separately colored segments: `● 2 run`, `✓ 1 done`, `✕ 0 err`. */
+export function headerSegments(total: SubagentCounts): HeaderSegment[] {
+  return [
+    headerSegment("run", STATE.RUNNING, total.running),
+    headerSegment("done", STATE.DONE, total.done),
+    headerSegment("err", STATE.ERROR, total.failed),
+  ];
+}
+
+/** `headerLine`: the counts the panel colors and the footer prints, as one string. */
 export function headerLine(total: SubagentCounts): string {
-  return `Subagents  ${total.running} run · ${total.done} done · ${total.failed} err`;
+  return headerSegments(total)
+    .map((segment) => segment.text)
+    .join(SEPARATOR);
 }
 
 /**

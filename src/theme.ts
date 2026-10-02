@@ -16,15 +16,19 @@ export const WARNING_FALLBACK = "#ffcb6b";
 export const SELECTED_TOKEN = "text.action.primary.selected";
 export const SELECTED_FALLBACK = "#82aaff";
 
-/** Marker glyph per state, paired with the theme token used to color it. */
+/**
+ * Marker glyph per state, paired with the theme token used to color it, and
+ * `bracketed` — the panel row's form. All three live in one entry so a bracket
+ * and its color can never come from different states.
+ */
 export const MARKERS = {
-  running: { glyph: "●", token: WARNING_TOKEN, fallback: WARNING_FALLBACK },
-  idle: { glyph: "◌", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },
-  done: { glyph: "✓", token: "text.feedback.success.default", fallback: "#c3e88d" },
-  error: { glyph: "✕", token: "text.feedback.error.default", fallback: "#f07178" },
-  interrupted: { glyph: "⊘", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },
-  unknown: { glyph: "○", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },
-} as const satisfies Record<State, { glyph: string; token: string; fallback: string }>;
+  running: { glyph: "●", bracketed: "[ ]", token: WARNING_TOKEN, fallback: WARNING_FALLBACK },
+  idle: { glyph: "◌", bracketed: "[◌]", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },
+  done: { glyph: "✓", bracketed: "[✓]", token: "text.feedback.success.default", fallback: "#c3e88d" },
+  error: { glyph: "✕", bracketed: "[✕]", token: "text.feedback.error.default", fallback: "#f07178" },
+  interrupted: { glyph: "⊘", bracketed: "[⊘]", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },
+  unknown: { glyph: "○", bracketed: "[○]", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },
+} as const satisfies Record<State, { glyph: string; bracketed: string; token: string; fallback: string }>;
 
 export const PERMISSION_GLYPH = "⚠";
 export const CURRENT_GLYPH = "›";

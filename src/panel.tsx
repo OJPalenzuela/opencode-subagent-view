@@ -13,8 +13,10 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "so
 import { COMMAND_IDS } from "./commands.js";
 import { ensureMessages, rowPercent } from "./context.js";
 import type { ModelInfoLike } from "./context.js";
-import { collectSubagents, counts, headerLine, orderRows, rowLine, stateOf, visibleRows } from "./subagents.js";
+import type { State } from "./format.js";
+import { collectSubagents, counts, headerSegments, orderRows, rowParts, visibleRows } from "./subagents.js";
 import type {
+  HeaderSegment,
   PermissionLookup,
   StatusLookup,
   SubagentRow,
@@ -216,26 +218,49 @@ function SubagentPanel(props: {
 
   const subdued = () => resolveFg(context, SUBDUED_TOKEN, SUBDUED_FALLBACK);
 
-  const header = () => headerLine(counts(rows()));
+  const header = createMemo(() => headerSegments(counts(rows())));
 
-  const rowFg = (row: SubagentRow, index: number) => {
+  const headerFg = (segment: HeaderSegment) => resolveFg(context, segment.token, segment.fallback);
+
+  const rowFg = (row: SubagentRow, state: State, index: number) => {
     if (index === Math.min(cursor(), lastIndex())) {
       return resolveFg(context, SELECTED_TOKEN, SELECTED_FALLBACK);
     }
     if (row.needsPermission) return resolveFg(context, WARNING_TOKEN, WARNING_FALLBACK);
-    const marker = MARKERS[stateOf(row)];
+    const marker = MARKERS[state];
     return resolveFg(context, marker.token, marker.fallback);
   };
 
   return (
     <box flexDirection="column">
-      <text fg={resolveFg(context, SELECTED_TOKEN, SELECTED_FALLBACK)}>{header()}</text>
+      <box flexDirection="row">
+        <For each={header()}>
+          {(segment, index) => (
+            <>
+              <Show when={index() > 0}>
+                <text fg={subdued()}> · </text>
+              </Show>
+              <text fg={headerFg(segment)}>{segment.text}</text>
+            </>
+          )}
+        </For>
+      </box>
       <Show
         when={rows().length > 0}
         fallback={<text fg={subdued()}>No subagents in this session</text>}
       >
         <For each={rows()}>
-          {(row, index) => <text fg={rowFg(row, index())}>{rowLine(row, now())}</text>}
+          {(row, index) => {
+            const parts = () => rowParts(row, now());
+            return (
+              <box flexDirection="column">
+                <text fg={rowFg(row, parts().state, index())}>{parts().label}</text>
+                <Show when={parts().meta !== ""}>
+                  <text fg={subdued()}>{parts().meta}</text>
+                </Show>
+              </box>
+            );
+          }}
         </For>
       </Show>
       <text fg={subdued()}>{HINT}</text>

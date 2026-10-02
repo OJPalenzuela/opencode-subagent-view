@@ -139,6 +139,17 @@ export function formatTokens(n: number): string {
 }
 
 /**
+ * Exact token count with thousands separators: `0`, `999`, `19,212`,
+ * `1,234,567`. For the panel row, which has a line of its own for the metrics and
+ * so no reason to abbreviate; the status line keeps the compact `formatTokens`.
+ *
+ * The locale is pinned so the separators never follow the host's locale.
+ */
+export function formatExactTokens(n: number): string {
+  return Math.max(0, Math.round(finite(n) ?? 0)).toLocaleString("en-US");
+}
+
+/**
  * Whole percent, no decimals: `0`, `37`, `128`. Halfway rounds up, and
  * non-numbers read as `0` like the other formatters do.
  *

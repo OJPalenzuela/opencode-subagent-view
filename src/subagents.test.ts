@@ -4,12 +4,15 @@ import {
   counts,
   footerText,
   headerLine,
+  headerSegments,
   orderRows,
-  rowLine,
+  rowParts,
   stateOf,
   visibleRows,
 } from "./subagents.js";
 import type { SubagentRow, SubagentSession } from "./subagents.js";
+import type { State } from "./format.js";
+import { MARKERS } from "./theme.js";
 
 const T0 = 1_700_000_000_000;
 
@@ -268,75 +271,124 @@ describe("stateOf", () => {
   });
 });
 
-describe("rowLine", () => {
-  it("renders the documented row format", () => {
-    const line = rowLine(
+describe("rowParts", () => {
+  it("splits the row into a state-colored label line and a subdued meta line", () => {
+    const parts = rowParts(
       row({
         label: "explore",
         model: "claude-sonnet-4-6",
-        tokens: 12400,
-        cost: 0.04,
-        status: "running",
-        time: { created: T0, updated: T0 },
-      }),
-      T0 + 154_000,
-    );
-    expect(line).toBe("  ● explore · claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok · $0.04");
-  });
-
-  it("marks the current session and indents by depth", () => {
-    const line = rowLine(
-      row({
-        label: "review",
-        isCurrent: true,
-        depth: 3,
-        outcome: "succeeded",
-        time: { created: T0, updated: T0 + 5_000 },
-      }),
-      T0 + 5_000,
-    );
-    expect(line).toBe("› ✓     review · ⏱ 00:05");
-  });
-
-  it("appends the permission marker and hides zero metrics", () => {
-    const line = rowLine(row({ label: "plan", needsPermission: true, tokens: 0, cost: 0 }), T0);
-    expect(line).toBe("  ○ plan ⚠");
-  });
-
-  it("appends the context percentage last, after the cost", () => {
-    const line = rowLine(
-      row({
-        label: "explore",
-        model: "claude-sonnet-4-6",
-        tokens: 12400,
+        tokens: 19_212,
         cost: 0.04,
         contextPercent: 37,
-        status: "running",
-        time: { created: T0, updated: T0 },
+        outcome: "succeeded",
+        time: { created: T0, updated: T0 + 154_000 },
       }),
       T0 + 154_000,
     );
-    expect(line).toBe("  ● explore · claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok · $0.04 · 37% ctx");
+    expect(parts.state).toBe("done");
+    expect(parts.label).toBe("  [✓] explore · claude-sonnet-4-6");
+    expect(parts.meta).toBe("      ↳ ⏱ 02:34  19,212 tok · $0.04 · 37% ctx");
   });
 
-  it("renders the context percentage without any other metric", () => {
-    expect(rowLine(row({ label: "plan", contextPercent: 37 }), T0)).toBe("  ○ plan · 37% ctx");
+  it("brackets the marker of every state and reports the state it colors from", () => {
+    const cases: readonly (readonly [Partial<SubagentRow>, State, string])[] = [
+      [{ status: "running" }, "running", "[ ]"],
+      [{ status: "idle" }, "idle", "[◌]"],
+      [{ outcome: "succeeded" }, "done", "[✓]"],
+      [{ outcome: "failed" }, "error", "[✕]"],
+      [{ outcome: "interrupted" }, "interrupted", "[⊘]"],
+      [{}, "unknown", "[○]"],
+    ];
+    for (const [overrides, state, marker] of cases) {
+      const parts = rowParts(row(overrides), T0);
+      expect(parts.state).toBe(state);
+      expect(parts.label).toBe(`  ${marker} subagent`);
+      expect(parts.meta).toBe("");
+    }
+  });
+
+  it("marks the current session and indents the label and the meta line by depth", () => {
+    const parts = rowParts(
+      row({ label: "review", isCurrent: true, depth: 3, outcome: "succeeded", time: { created: T0, updated: T0 + 5_000 } }),
+      T0 + 5_000,
+    );
+    expect(parts.label).toBe("› [✓]     review");
+    expect(parts.meta).toBe("          ↳ ⏱ 00:05");
+  });
+
+  it("keeps the permission marker on the label line", () => {
+    const parts = rowParts(row({ label: "plan", needsPermission: true }), T0);
+    expect(parts.label).toBe("  [○] plan ⚠");
+    expect(parts.meta).toBe("");
+  });
+
+  it("drops zero metrics and keeps the meta line free of the model", () => {
+    const parts = rowParts(row({ label: "plan", model: "gpt-5", tokens: 0, cost: 0, time: { created: T0, updated: T0 } }), T0);
+    expect(parts.label).toBe("  [○] plan · gpt-5");
+    expect(parts.meta).toBe("      ↳ ⏱ 00:00");
+  });
+
+  it("gates the cost and the context percentage, keeping that one last", () => {
+    const withCost = rowParts(row({ label: "explore", tokens: 19_212, cost: 0.04 }), T0);
+    expect(withCost.meta).toBe("      ↳ 19,212 tok · $0.04");
+    const withPercent = rowParts(row({ label: "explore", contextPercent: 37 }), T0);
+    expect(withPercent.meta).toBe("      ↳ 37% ctx");
+    const withBoth = rowParts(row({ label: "explore", cost: 0.04, contextPercent: 37 }), T0);
+    expect(withBoth.meta).toBe("      ↳ $0.04 · 37% ctx");
   });
 
   it("omits a missing or non-finite context percentage", () => {
     for (const contextPercent of [undefined, Number.NaN, Number.POSITIVE_INFINITY]) {
-      expect(rowLine(row({ label: "plan", contextPercent }), T0)).toBe("  ○ plan");
+      expect(rowParts(row({ label: "plan", contextPercent }), T0).meta).toBe("");
     }
+  });
+
+  it("keeps the elapsed clock running and freezes it once the outcome is set", () => {
+    const running = rowParts(row({ label: "plan", time: { created: T0, updated: T0 } }), T0 + 60_000);
+    expect(running.meta).toBe("      ↳ ⏱ 01:00");
+    const frozen = rowParts(row({ label: "plan", outcome: "succeeded", time: { created: T0, updated: T0 + 900_000 } }), T0 + 3_600_000);
+    expect(frozen.meta).toBe("      ↳ ⏱ 15:00");
+  });
+});
+
+describe("headerSegments", () => {
+  it("returns the three counts, each with the token of its state", () => {
+    expect(headerSegments({ running: 2, done: 1, failed: 1 })).toEqual([
+      { text: "● 2 run", token: MARKERS.running.token, fallback: MARKERS.running.fallback },
+      { text: "✓ 1 done", token: MARKERS.done.token, fallback: MARKERS.done.fallback },
+      { text: "✕ 1 err", token: MARKERS.error.token, fallback: MARKERS.error.fallback },
+    ]);
+  });
+
+  it("renders zeroes without hiding a segment", () => {
+    expect(headerSegments({ running: 0, done: 0, failed: 0 }).map((segment) => segment.text)).toEqual([
+      "● 0 run",
+      "✓ 0 done",
+      "✕ 0 err",
+    ]);
+  });
+
+  it("keeps the error segment when only errors are present", () => {
+    expect(headerSegments({ running: 0, done: 0, failed: 3 }).map((segment) => segment.text)).toEqual([
+      "● 0 run",
+      "✓ 0 done",
+      "✕ 3 err",
+    ]);
   });
 });
 
 describe("headerLine", () => {
-  it("renders the counts line", () => {
-    expect(headerLine({ running: 2, done: 1, failed: 0 })).toBe("Subagents  2 run · 1 done · 0 err");
+  it("joins the header segments with the separator", () => {
+    expect(headerLine({ running: 2, done: 1, failed: 0 })).toBe("● 2 run · ✓ 1 done · ✕ 0 err");
   });
 
   it("renders zeroes", () => {
-    expect(headerLine({ running: 0, done: 0, failed: 0 })).toBe("Subagents  0 run · 0 done · 0 err");
+    expect(headerLine({ running: 0, done: 0, failed: 0 })).toBe("● 0 run · ✓ 0 done · ✕ 0 err");
+  });
+
+  it("is exactly the segments the panel colors", () => {
+    const total = { running: 1, done: 2, failed: 3 };
+    expect(headerLine(total)).toBe(headerSegments(total).map((segment) => segment.text).join(" · "));
   });
 });
 
@@ -346,11 +398,11 @@ describe("footerText", () => {
   });
 
   it("reuses the header line as soon as one subagent is known", () => {
-    expect(footerText({ running: 0, done: 1, failed: 0 })).toBe("Subagents  0 run · 1 done · 0 err");
+    expect(footerText({ running: 0, done: 1, failed: 0 })).toBe("● 0 run · ✓ 1 done · ✕ 0 err");
   });
 
   it("stays visible while work is running or has failed", () => {
-    expect(footerText({ running: 2, done: 0, failed: 1 })).toBe("Subagents  2 run · 0 done · 1 err");
+    expect(footerText({ running: 2, done: 0, failed: 1 })).toBe("● 2 run · ✓ 0 done · ✕ 1 err");
   });
 
   it("is the header line, not a second text shape", () => {

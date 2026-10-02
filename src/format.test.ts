@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildSummary, formatCost, formatDuration, formatPercent, formatTokens } from "./format.js";
+import {
+  buildSummary,
+  formatCost,
+  formatDuration,
+  formatExactTokens,
+  formatPercent,
+  formatTokens,
+} from "./format.js";
 import type { SessionLike, SessionModel } from "./format.js";
 
 const T0 = 1_700_000_000_000;
@@ -79,6 +86,26 @@ describe("formatTokens", () => {
     expect(formatTokens(-1)).toBe("0");
     expect(formatTokens(-1_200)).toBe("0");
     expect(formatTokens(Number.NaN)).toBe("0");
+  });
+});
+
+describe("formatExactTokens", () => {
+  it("prints the exact count with thousands separators", () => {
+    expect(formatExactTokens(0)).toBe("0");
+    expect(formatExactTokens(7)).toBe("7");
+    expect(formatExactTokens(999)).toBe("999");
+    expect(formatExactTokens(1_000)).toBe("1,000");
+    expect(formatExactTokens(19_212)).toBe("19,212");
+    expect(formatExactTokens(1_234_567)).toBe("1,234,567");
+    expect(formatExactTokens(1_234_567_890)).toBe("1,234,567,890");
+  });
+
+  it("rounds fractions and clamps negatives and non-numbers to 0", () => {
+    expect(formatExactTokens(1_234.6)).toBe("1,235");
+    expect(formatExactTokens(-1)).toBe("0");
+    expect(formatExactTokens(Number.NaN)).toBe("0");
+    expect(formatExactTokens(Number.POSITIVE_INFINITY)).toBe("0");
+    expect(formatExactTokens(undefined as unknown as number)).toBe("0");
   });
 });
 

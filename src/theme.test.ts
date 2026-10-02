@@ -21,4 +21,8 @@ describe("MARKERS", () => {
       expect(MARKERS[state].fallback).toMatch(/^#[0-9a-f]{6}$/i);
     }
   });
+
+  it("brackets the panel marker of every state, one distinct form each", () => {
+    expect(STATES.map((state) => MARKERS[state].bracketed)).toEqual(["[ ]", "[◌]", "[✓]", "[✕]", "[⊘]", "[○]"]);
+  });
 });

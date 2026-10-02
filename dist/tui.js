@@ -57,6 +57,9 @@ function formatTokens(n) {
   const unit = TOKEN_UNITS[index];
   return `${(total / unit.size).toFixed(1)}${unit.suffix}`;
 }
+function formatExactTokens(n) {
+  return Math.max(0, Math.round(finite(n) ?? 0)).toLocaleString("en-US");
+}
 function formatPercent(percent) {
   return String(Math.round(finite(percent) ?? 0));
 }
@@ -222,12 +225,12 @@ var WARNING_FALLBACK = "#ffcb6b";
 var SELECTED_TOKEN = "text.action.primary.selected";
 var SELECTED_FALLBACK = "#82aaff";
 var MARKERS = {
-  running: { glyph: "\u25CF", token: WARNING_TOKEN, fallback: WARNING_FALLBACK },
-  idle: { glyph: "\u25CC", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },
-  done: { glyph: "\u2713", token: "text.feedback.success.default", fallback: "#c3e88d" },
-  error: { glyph: "\u2715", token: "text.feedback.error.default", fallback: "#f07178" },
-  interrupted: { glyph: "\u2298", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },
-  unknown: { glyph: "\u25CB", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK }
+  running: { glyph: "\u25CF", bracketed: "[ ]", token: WARNING_TOKEN, fallback: WARNING_FALLBACK },
+  idle: { glyph: "\u25CC", bracketed: "[\u25CC]", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },
+  done: { glyph: "\u2713", bracketed: "[\u2713]", token: "text.feedback.success.default", fallback: "#c3e88d" },
+  error: { glyph: "\u2715", bracketed: "[\u2715]", token: "text.feedback.error.default", fallback: "#f07178" },
+  interrupted: { glyph: "\u2298", bracketed: "[\u2298]", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },
+  unknown: { glyph: "\u25CB", bracketed: "[\u25CB]", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK }
 };
 var PERMISSION_GLYPH = "\u26A0";
 var CURRENT_GLYPH = "\u203A";
@@ -365,24 +368,41 @@ function counts(rows) {
   return { running, done, failed };
 }
 var INDENT = "  ";
-function rowLine(row, now) {
-  const parts = [];
-  if (row.model) parts.push(row.model);
-  const elapsed = elapsedMs(row, now);
-  if (elapsed !== void 0) parts.push(`\u23F1 ${formatDuration(elapsed)}`);
-  if (row.tokens !== void 0 && row.tokens > 0) parts.push(`${formatTokens(row.tokens)} tok`);
-  if (row.cost !== void 0 && row.cost > 0) parts.push(formatCost(row.cost));
-  const percent = finite(row.contextPercent);
-  if (percent !== void 0) parts.push(`${formatPercent(percent)}% ctx`);
+var SEPARATOR3 = " \xB7 ";
+var LABEL_COLUMN = 6;
+function headerSegment(noun, state, count) {
+  const marker = MARKERS[state];
+  return { text: `${marker.glyph} ${count} ${noun}`, token: marker.token, fallback: marker.fallback };
+}
+function rowParts(row, now) {
+  const state = stateOf(row, now);
+  const depth = Math.max(0, row.depth - 1);
   const current = row.isCurrent ? CURRENT_GLYPH : " ";
-  const glyph = MARKERS[stateOf(row, now)].glyph;
-  const indent = INDENT.repeat(Math.max(0, row.depth - 1));
-  const meta = parts.length > 0 ? ` \xB7 ${parts.join(" \xB7 ")}` : "";
+  const label = row.model ? `${row.label}${SEPARATOR3}${row.model}` : row.label;
   const pending = row.needsPermission ? ` ${PERMISSION_GLYPH}` : "";
-  return `${current} ${glyph} ${indent}${row.label}${meta}${pending}`;
+  const labelLine = `${current} ${MARKERS[state].bracketed} ${INDENT.repeat(depth)}${label}${pending}`;
+  const elapsed = elapsedMs(row, now);
+  const head = [
+    elapsed === void 0 ? "" : `\u23F1 ${formatDuration(elapsed)}`,
+    row.tokens === void 0 || row.tokens <= 0 ? "" : `${formatExactTokens(row.tokens)} tok`
+  ].filter((part) => part !== "").join("  ");
+  const rest = [];
+  if (row.cost !== void 0 && row.cost > 0) rest.push(formatCost(row.cost));
+  const percent = finite(row.contextPercent);
+  if (percent !== void 0) rest.push(`${formatPercent(percent)}% ctx`);
+  const segments = head === "" ? rest : [head, ...rest];
+  const metaLine = segments.length === 0 ? "" : `${" ".repeat(LABEL_COLUMN + INDENT.length * depth)}\u21B3 ${segments.join(SEPARATOR3)}`;
+  return { state, label: labelLine, meta: metaLine };
+}
+function headerSegments(total) {
+  return [
+    headerSegment("run", STATE.RUNNING, total.running),
+    headerSegment("done", STATE.DONE, total.done),
+    headerSegment("err", STATE.ERROR, total.failed)
+  ];
 }
 function headerLine(total) {
-  return `Subagents  ${total.running} run \xB7 ${total.done} done \xB7 ${total.failed} err`;
+  return headerSegments(total).map((segment) => segment.text).join(SEPARATOR3);
 }
 function footerText(total) {
   return total.running + total.done + total.failed > 0 ? headerLine(total) : void 0;
@@ -434,8 +454,8 @@ function registerFooter(context, tick) {
 import { effect as _$effect2 } from "@opentui/solid";
 import { createTextNode as _$createTextNode } from "@opentui/solid";
 import { insertNode as _$insertNode } from "@opentui/solid";
-import { createComponent as _$createComponent2 } from "@opentui/solid";
 import { insert as _$insert2 } from "@opentui/solid";
+import { createComponent as _$createComponent2 } from "@opentui/solid";
 import { setProp as _$setProp2 } from "@opentui/solid";
 import { createElement as _$createElement2 } from "@opentui/solid";
 import { createEffect, createMemo as createMemo2, createSignal, For, onCleanup, Show as Show2 } from "solid-js";
@@ -579,31 +599,53 @@ function SubagentPanel(props) {
     }]
   }));
   const subdued = () => resolveFg(context, SUBDUED_TOKEN, SUBDUED_FALLBACK);
-  const header = () => headerLine(counts(rows()));
-  const rowFg = (row, index) => {
+  const header = createMemo2(() => headerSegments(counts(rows())));
+  const headerFg = (segment) => resolveFg(context, segment.token, segment.fallback);
+  const rowFg = (row, state, index) => {
     if (index === Math.min(cursor(), lastIndex())) {
       return resolveFg(context, SELECTED_TOKEN, SELECTED_FALLBACK);
     }
     if (row.needsPermission) return resolveFg(context, WARNING_TOKEN, WARNING_FALLBACK);
-    const marker = MARKERS[stateOf(row)];
+    const marker = MARKERS[state];
     return resolveFg(context, marker.token, marker.fallback);
   };
   return (() => {
-    var _el$ = _$createElement2("box"), _el$2 = _$createElement2("text"), _el$3 = _$createElement2("text");
+    var _el$ = _$createElement2("box"), _el$2 = _$createElement2("box"), _el$3 = _$createElement2("text");
     _$insertNode(_el$, _el$2);
     _$insertNode(_el$, _el$3);
     _$setProp2(_el$, "flexDirection", "column");
-    _$insert2(_el$2, header);
+    _$setProp2(_el$2, "flexDirection", "row");
+    _$insert2(_el$2, _$createComponent2(For, {
+      get each() {
+        return header();
+      },
+      children: (segment, index) => [_$createComponent2(Show2, {
+        get when() {
+          return index() > 0;
+        },
+        get children() {
+          var _el$5 = _$createElement2("text");
+          _$insertNode(_el$5, _$createTextNode(` \xB7 `));
+          _$effect2((_$p) => _$setProp2(_el$5, "fg", subdued(), _$p));
+          return _el$5;
+        }
+      }), (() => {
+        var _el$7 = _$createElement2("text");
+        _$insert2(_el$7, () => segment.text);
+        _$effect2((_$p) => _$setProp2(_el$7, "fg", headerFg(segment), _$p));
+        return _el$7;
+      })()]
+    }));
     _$insert2(_el$, _$createComponent2(Show2, {
       get when() {
         return rows().length > 0;
       },
       get fallback() {
         return (() => {
-          var _el$5 = _$createElement2("text");
-          _$insertNode(_el$5, _$createTextNode(`No subagents in this session`));
-          _$effect2((_$p) => _$setProp2(_el$5, "fg", subdued(), _$p));
-          return _el$5;
+          var _el$8 = _$createElement2("text");
+          _$insertNode(_el$8, _$createTextNode(`No subagents in this session`));
+          _$effect2((_$p) => _$setProp2(_el$8, "fg", subdued(), _$p));
+          return _el$8;
         })();
       },
       get children() {
@@ -611,25 +653,33 @@ function SubagentPanel(props) {
           get each() {
             return rows();
           },
-          children: (row, index) => (() => {
-            var _el$7 = _$createElement2("text");
-            _$insert2(_el$7, () => rowLine(row, now()));
-            _$effect2((_$p) => _$setProp2(_el$7, "fg", rowFg(row, index()), _$p));
-            return _el$7;
-          })()
+          children: (row, index) => {
+            const parts = () => rowParts(row, now());
+            return (() => {
+              var _el$0 = _$createElement2("box"), _el$1 = _$createElement2("text");
+              _$insertNode(_el$0, _el$1);
+              _$setProp2(_el$0, "flexDirection", "column");
+              _$insert2(_el$1, () => parts().label);
+              _$insert2(_el$0, _$createComponent2(Show2, {
+                get when() {
+                  return parts().meta !== "";
+                },
+                get children() {
+                  var _el$10 = _$createElement2("text");
+                  _$insert2(_el$10, () => parts().meta);
+                  _$effect2((_$p) => _$setProp2(_el$10, "fg", subdued(), _$p));
+                  return _el$10;
+                }
+              }), null);
+              _$effect2((_$p) => _$setProp2(_el$1, "fg", rowFg(row, parts().state, index()), _$p));
+              return _el$0;
+            })();
+          }
         });
       }
     }), _el$3);
     _$insertNode(_el$3, _$createTextNode(`j/k move \xB7 enter open \xB7 c completed \xB7 f fullscreen \xB7 esc close`));
-    _$effect2((_p$) => {
-      var _v$ = resolveFg(context, SELECTED_TOKEN, SELECTED_FALLBACK), _v$2 = subdued();
-      _v$ !== _p$.e && (_p$.e = _$setProp2(_el$2, "fg", _v$, _p$.e));
-      _v$2 !== _p$.t && (_p$.t = _$setProp2(_el$3, "fg", _v$2, _p$.t));
-      return _p$;
-    }, {
-      e: void 0,
-      t: void 0
-    });
+    _$effect2((_$p) => _$setProp2(_el$3, "fg", subdued(), _$p));
     return _el$;
   })();
 }
