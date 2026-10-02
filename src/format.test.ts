@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildSummary, formatCost, formatDuration, formatTokens } from "./format.js";
-import type { SessionLike } from "./format.js";
+import type { SessionLike, SessionModel } from "./format.js";
 
 const T0 = 1_700_000_000_000;
 
@@ -114,7 +114,7 @@ describe("buildSummary state", () => {
 
   it("uses status when there is no outcome", () => {
     expect(buildSummary(session(), T0, "running").state).toBe("running");
-    expect(buildSummary(session(), T0, "idle").state).toBe("unknown");
+    expect(buildSummary(session(), T0, "idle").state).toBe("idle");
     expect(buildSummary(session(), T0).state).toBe("unknown");
   });
 
@@ -135,8 +135,8 @@ describe("buildSummary label", () => {
 describe("buildSummary parts", () => {
   it("renders model, elapsed and tokens in order", () => {
     const summary = buildSummary(session(), T0 + 154_000);
-    expect(summary.parts).toEqual(["claude-sonnet-4-6", "⏱ 02:34", "12.4k tok"]);
-    expect(summary.text).toBe("claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok");
+    expect(summary.parts).toEqual(["anthropic/claude-sonnet-4-6", "⏱ 02:34", "12.4k tok"]);
+    expect(summary.text).toBe("anthropic/claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok");
   });
 
   it("sums input and output tokens only", () => {
@@ -179,10 +179,67 @@ describe("buildSummary parts", () => {
   });
 });
 
+describe("buildSummary model segment", () => {
+  function modelSegment(model: SessionModel | undefined): string | undefined {
+    return buildSummary(session({ model }), T0).parts[0];
+  }
+
+  it("qualifies the id with the provider", () => {
+    expect(modelSegment({ id: "claude-sonnet-4-6", providerID: "anthropic" })).toBe(
+      "anthropic/claude-sonnet-4-6",
+    );
+  });
+
+  it("falls back to the bare id when there is no provider", () => {
+    expect(modelSegment({ id: "gpt-5" })).toBe("gpt-5");
+  });
+
+  it("appends the variant in parentheses", () => {
+    expect(modelSegment({ id: "claude-sonnet-4-6", providerID: "anthropic", variant: "thinking" })).toBe(
+      "anthropic/claude-sonnet-4-6 (thinking)",
+    );
+    expect(modelSegment({ id: "gpt-5", variant: "high" })).toBe("gpt-5 (high)");
+  });
+
+  it("does not repeat a provider already in the id", () => {
+    expect(modelSegment({ id: "anthropic/claude-sonnet-4-6", providerID: "anthropic" })).toBe(
+      "anthropic/claude-sonnet-4-6",
+    );
+  });
+
+  it("omits the segment without an id", () => {
+    expect(buildSummary(session({ model: undefined }), T0).parts).toEqual(["⏱ 00:00", "12.4k tok"]);
+  });
+});
+
+describe("buildSummary cost segment", () => {
+  it("appends the cost after the tokens", () => {
+    const summary = buildSummary(session({ cost: 0.04 }), T0 + 154_000);
+    expect(summary.parts).toEqual([
+      "anthropic/claude-sonnet-4-6",
+      "⏱ 02:34",
+      "12.4k tok",
+      "$0.04",
+    ]);
+    expect(summary.text).toBe("anthropic/claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok · $0.04");
+  });
+
+  it("keeps the cost when every other metric is missing", () => {
+    expect(buildSummary({ cost: 12.3 }, T0).parts).toEqual(["$12.30"]);
+  });
+
+  it("omits a missing, zero or non-finite cost", () => {
+    for (const cost of [undefined, 0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const summary = buildSummary(session({ cost }), T0);
+      expect(summary.parts.some((part) => part.startsWith("$"))).toBe(false);
+    }
+  });
+});
+
 describe("buildSummary resilience", () => {
   it("never throws on an empty session", () => {
     const summary = buildSummary({}, T0, "idle");
-    expect(summary.state).toBe("unknown");
+    expect(summary.state).toBe("idle");
     expect(summary.label).toBe("subagent");
     expect(summary.parts).toEqual([]);
     expect(summary.text).toBe("");

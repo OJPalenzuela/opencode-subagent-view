@@ -217,6 +217,11 @@ describe("visibleRows", () => {
     expect(visibleRows(pending, false).map((r) => r.id)).toEqual(["perm"]);
   });
 
+  it("keeps an idle row visible: idle is not terminal", () => {
+    const idle = [row({ id: "idle", status: "idle" })];
+    expect(visibleRows(idle, false).map((r) => r.id)).toEqual(["idle"]);
+  });
+
   it("returns everything when completed are shown", () => {
     expect(visibleRows(rows, true).map((r) => r.id)).toEqual(rows.map((r) => r.id));
   });
@@ -249,7 +254,7 @@ describe("stateOf", () => {
 
   it("uses the status when there is no outcome", () => {
     expect(stateOf(row({ status: "running" }), T0)).toBe("running");
-    expect(stateOf(row({ status: "idle" }))).toBe("unknown");
+    expect(stateOf(row({ status: "idle" }))).toBe("idle");
     expect(stateOf(row())).toBe("unknown");
   });
 });

@@ -3,10 +3,11 @@
 When you are inside a subagent's session in the OpenCode v2 TUI, the interface
 stops telling you what that subagent is doing — no model, no token usage, no
 clock. This plugin adds one live line above the composer for exactly that case:
-state dot, agent name, model, elapsed time and tokens, e.g.
+state dot, agent name, model (`provider/id`, with the variant when the session
+picked one), elapsed time, tokens and cost, e.g.
 
 ```
-● explore · claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok
+● explore · anthropic/claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok · $0.04
 ```
 
 It renders nothing in root sessions, so it stays out of the way everywhere else.
@@ -20,14 +21,15 @@ children and grandchildren, one row each:
 ```
 Subagents  2 run · 1 done · 0 err
   ● explore · claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok
-    ○ review · gpt-5 · ⏱ 00:12 · 3.1k tok
+    ◌ review · gpt-5 · ⏱ 00:12 · 3.1k tok
 › ✓ build · claude-sonnet-4-6 · ⏱ 01:04 · 8.0k tok · $0.04
   ● docs · claude-sonnet-4-6 · ⏱ 00:03 · 1.2k tok ⚠
 j/k move · enter open · c completed · f fullscreen · esc close
 ```
 
-- `●` running, `✓` done, `✕` failed, `⊘` interrupted, `○` unknown — same markers
-  as the status line.
+- `●` running, `◌` idle, `✓` done, `✕` failed, `⊘` interrupted, `○` unknown —
+  same markers as the status line. Idle and unknown rows stay in the panel; only
+  done, failed and interrupted are hidden by `c`.
 - Rows are indented by depth, so nested subagents sit under their parent.
 - ⚠ marks a session with a permission request waiting for an answer.
 - `›` marks the session you are currently in.
@@ -103,8 +105,8 @@ Restart the TUI after editing the config.
 | Elapsed clock | 1-second tick; frozen at `time.idle` once the session reports an `outcome` |
 | Record changes | `data.listen` with ~200 ms coalescing, so event bursts render once |
 | Session switch | `data.session.sync(sessionID)` on change |
-| State markers | `●` running, `✓` done, `✕` failed, `⊘` interrupted, `○` unknown |
-| Partial data | Missing model/tokens/time are omitted; nothing throws |
+| State markers | `●` running, `◌` idle, `✓` done, `✕` failed, `⊘` interrupted, `○` unknown |
+| Partial data | Missing model/cost/tokens/time are omitted; nothing throws |
 | Panel rows | Root resolved by walking `parentID`; grandchildren included |
 | Panel permissions | Cached with `session.permission.sync` on open, and on every `permission.asked` |
 

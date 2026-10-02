@@ -8,6 +8,7 @@
 /** Lifecycle state of the subagent session being displayed. */
 const STATE = {
   RUNNING: "running",
+  IDLE: "idle",
   DONE: "done",
   ERROR: "error",
   INTERRUPTED: "interrupted",
@@ -35,6 +36,7 @@ export const DEFAULT_LABEL = "subagent";
 export interface SessionModel {
   readonly id: string;
   readonly providerID?: string;
+  readonly variant?: string;
 }
 
 export interface SessionTokens {
@@ -60,6 +62,8 @@ export interface SessionLike {
   readonly model?: SessionModel;
   readonly tokens?: SessionTokens;
   readonly time?: SessionTime;
+  /** USD already spent. Zero and non-finite values render as no segment. */
+  readonly cost?: number;
 }
 
 export interface Summary {
@@ -133,10 +137,17 @@ interface OutcomeCarrier {
   readonly outcome?: Outcome;
 }
 
+/**
+ * `outcome` wins: it is the server's verdict and the only source of a terminal
+ * state. Without it the live `status` is authoritative, so an `idle` session is
+ * reported as idle instead of being lumped in with unknown. Only a missing
+ * status — or an outcome string this build does not know — is `unknown`.
+ */
 function deriveState(session: OutcomeCarrier, status: SessionStatus | undefined): State {
   const outcome = session.outcome;
   if (outcome !== undefined) return OUTCOME_STATE[outcome] ?? STATE.UNKNOWN;
-  return status === "running" ? STATE.RUNNING : STATE.UNKNOWN;
+  if (status === "running") return STATE.RUNNING;
+  return status === "idle" ? STATE.IDLE : STATE.UNKNOWN;
 }
 
 export { deriveState };
@@ -156,6 +167,19 @@ function elapsedMs(session: OutcomeCarrier & { readonly time?: SessionTime }, no
 
 export { elapsedMs };
 
+/**
+ * `anthropic/claude-sonnet-4-6`, or `claude-sonnet-4-6` without a provider,
+ * plus the variant when present. Ids that already carry the provider are left
+ * alone so the prefix is never printed twice.
+ */
+export function formatModel(model: SessionModel | undefined): string | undefined {
+  const id = model?.id;
+  if (!id) return undefined;
+  const provider = model?.providerID;
+  const qualified = provider && !id.startsWith(`${provider}/`) ? `${provider}/${id}` : id;
+  return model?.variant ? `${qualified} (${model.variant})` : qualified;
+}
+
 /** Build the label, the ordered segments and the joined one-line text. */
 export function buildSummary(
   session: SessionLike,
@@ -164,8 +188,8 @@ export function buildSummary(
 ): Summary {
   const parts: string[] = [];
 
-  const modelID = session.model?.id;
-  if (modelID) parts.push(modelID);
+  const model = formatModel(session.model);
+  if (model !== undefined) parts.push(model);
 
   const elapsed = elapsedMs(session, now);
   if (elapsed !== undefined) parts.push(`⏱ ${formatDuration(elapsed)}`);
@@ -175,6 +199,10 @@ export function buildSummary(
     ? (finite(tokens.input) ?? 0) + (finite(tokens.output) ?? 0)
     : 0;
   if (tokenTotal > 0) parts.push(`${formatTokens(tokenTotal)} tok`);
+
+  // Same gate as tokens: a spent-less session gets no `$0.00` filler.
+  const cost = finite(session.cost);
+  if (cost !== undefined && cost > 0) parts.push(formatCost(cost));
 
   const label = session.agent?.trim() || session.title?.trim() || DEFAULT_LABEL;
 

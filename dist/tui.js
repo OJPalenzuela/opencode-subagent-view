@@ -13,6 +13,7 @@ import { Show as Show2, createEffect as createEffect2, createMemo as createMemo2
 // src/format.ts
 var STATE = {
   RUNNING: "running",
+  IDLE: "idle",
   DONE: "done",
   ERROR: "error",
   INTERRUPTED: "interrupted",
@@ -59,7 +60,8 @@ function formatTokens(n) {
 function deriveState(session, status) {
   const outcome = session.outcome;
   if (outcome !== void 0) return OUTCOME_STATE[outcome] ?? STATE.UNKNOWN;
-  return status === "running" ? STATE.RUNNING : STATE.UNKNOWN;
+  if (status === "running") return STATE.RUNNING;
+  return status === "idle" ? STATE.IDLE : STATE.UNKNOWN;
 }
 function elapsedMs(session, now) {
   const created = finite(session.time?.created);
@@ -67,15 +69,24 @@ function elapsedMs(session, now) {
   const end = session.outcome !== void 0 ? finite(session.time?.idle) ?? finite(session.time?.updated) ?? now : now;
   return end - created;
 }
+function formatModel(model) {
+  const id = model?.id;
+  if (!id) return void 0;
+  const provider = model?.providerID;
+  const qualified = provider && !id.startsWith(`${provider}/`) ? `${provider}/${id}` : id;
+  return model?.variant ? `${qualified} (${model.variant})` : qualified;
+}
 function buildSummary(session, now, status) {
   const parts = [];
-  const modelID = session.model?.id;
-  if (modelID) parts.push(modelID);
+  const model = formatModel(session.model);
+  if (model !== void 0) parts.push(model);
   const elapsed = elapsedMs(session, now);
   if (elapsed !== void 0) parts.push(`\u23F1 ${formatDuration(elapsed)}`);
   const tokens = session.tokens;
   const tokenTotal2 = tokens ? (finite(tokens.input) ?? 0) + (finite(tokens.output) ?? 0) : 0;
   if (tokenTotal2 > 0) parts.push(`${formatTokens(tokenTotal2)} tok`);
+  const cost = finite(session.cost);
+  if (cost !== void 0 && cost > 0) parts.push(formatCost(cost));
   const label = session.agent?.trim() || session.title?.trim() || DEFAULT_LABEL;
   return {
     state: deriveState(session, status),
@@ -115,6 +126,7 @@ var SELECTED_TOKEN = "text.action.primary.selected";
 var SELECTED_FALLBACK = "#82aaff";
 var MARKERS = {
   running: { glyph: "\u25CF", token: WARNING_TOKEN, fallback: WARNING_FALLBACK },
+  idle: { glyph: "\u25CC", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },
   done: { glyph: "\u2713", token: "text.feedback.success.default", fallback: "#c3e88d" },
   error: { glyph: "\u2715", token: "text.feedback.error.default", fallback: "#f07178" },
   interrupted: { glyph: "\u2298", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },

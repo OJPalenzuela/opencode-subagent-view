@@ -19,6 +19,7 @@ export const SELECTED_FALLBACK = "#82aaff";
 /** Marker glyph per state, paired with the theme token used to color it. */
 export const MARKERS = {
   running: { glyph: "●", token: WARNING_TOKEN, fallback: WARNING_FALLBACK },
+  idle: { glyph: "◌", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },
   done: { glyph: "✓", token: "text.feedback.success.default", fallback: "#c3e88d" },
   error: { glyph: "✕", token: "text.feedback.error.default", fallback: "#f07178" },
   interrupted: { glyph: "⊘", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },

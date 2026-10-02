@@ -10,10 +10,9 @@ import { DEFAULT_LABEL, STATE, deriveState, elapsedMs, finite, formatCost, forma
 import type { Outcome, SessionLike, SessionStatus, SessionTime, State } from "./format.js";
 import { CURRENT_GLYPH, MARKERS, PERMISSION_GLYPH } from "./theme.js";
 
-/** `SessionLike` plus the identity and cost the panel needs. */
+/** `SessionLike` plus the row identity the panel needs. */
 export interface SubagentSession extends SessionLike {
   readonly id: string;
-  readonly cost?: number;
 }
 
 /** One panel line. `time` is the raw record so elapsed and recency agree. */
