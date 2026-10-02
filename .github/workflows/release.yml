@@ -1,0 +1,51 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create the GitHub release
+  id-token: write # npm trusted publishing (OIDC)
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify tag matches package.json version
+        run: |
+          PKG="v$(node -p "require('./package.json').version")"
+          if [ "$PKG" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package version $PKG"
+            exit 1
+          fi
+
+      - name: Test
+        run: pnpm test
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Publish to npm
+        run: npm publish
+
+      - name: Create GitHub release
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -86,6 +86,18 @@ pnpm typecheck               # tsc --noEmit
 Formatting logic lives in `src/format.ts` and is deliberately free of TUI imports
 so it can be unit tested in isolation.
 
+## Release
+
+Publishing is automated: pushing a `v*` tag that matches `package.json`'s version
+triggers the [`release`](.github/workflows/release.yml) workflow, which runs the
+tests, publishes to npm via trusted publishing (OIDC) and creates the GitHub
+release with generated notes.
+
+```sh
+npm version patch   # or minor / major: bumps package.json, commits, tags
+git push --follow-tags
+```
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

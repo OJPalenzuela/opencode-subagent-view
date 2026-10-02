@@ -1,6 +1,6 @@
 {
   "name": "opencode-subagent-view",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OpenCode v2 TUI plugin that shows live stats for the subagent session you are inside",
   "type": "module",
   "exports": {
