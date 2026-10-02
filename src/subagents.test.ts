@@ -9,7 +9,10 @@ import {
   rowCapacity,
   rowParts,
   rowWindow,
+  sidebarLine,
+  SIDEBAR_LIMIT,
   stateOf,
+  topRows,
   visibleRows,
 } from "./subagents.js";
 import type { SubagentRow, SubagentSession } from "./subagents.js";
@@ -241,6 +244,44 @@ describe("visibleRows", () => {
   });
 });
 
+describe("topRows", () => {
+  it("returns an empty list for no rows", () => {
+    expect(topRows([])).toEqual([]);
+  });
+
+  it("returns a single row as it is", () => {
+    const only = row({ id: "solo", label: "explore" });
+    expect(topRows([only])).toEqual([only]);
+  });
+
+  it("keeps every row when there are exactly as many as the limit", () => {
+    const rows = [
+      row({ id: "perm", needsPermission: true }),
+      row({ id: "running", status: "running" }),
+      row({ id: "done", outcome: "succeeded" }),
+    ];
+    expect(topRows(rows).map((r) => r.id)).toEqual(["perm", "running", "done"]);
+  });
+
+  it("keeps the three that need attention out of four", () => {
+    const rows = [
+      row({ id: "idle", time: { created: T0, updated: T0 + 100 } }),
+      row({ id: "done", outcome: "succeeded", time: { created: T0, updated: T0 + 800 } }),
+      row({ id: "running", status: "running", time: { created: T0, updated: T0 + 1 } }),
+      row({ id: "perm", status: "running", needsPermission: true }),
+    ];
+    expect(topRows(rows).map((r) => r.id)).toEqual(["perm", "running", "done"]);
+  });
+
+  it("caps a long list at the exported limit, in the panel's order", () => {
+    const rows = Array.from({ length: 10 }, (_, index) =>
+      row({ id: `s${index}`, outcome: "succeeded", time: { created: T0, updated: T0 + index } }),
+    );
+    expect(topRows(rows)).toEqual(orderRows(rows).slice(0, SIDEBAR_LIMIT));
+    expect(topRows(rows)).toHaveLength(SIDEBAR_LIMIT);
+  });
+});
+
 describe("counts", () => {
   it("counts running, done and failed rows", () => {
     const rows = [
@@ -356,6 +397,86 @@ describe("rowParts", () => {
     expect(running.meta).toBe("      ↳ ⏱ 01:00");
     const frozen = rowParts(row({ label: "plan", outcome: "succeeded", time: { created: T0, updated: T0 + 900_000 } }), T0 + 3_600_000);
     expect(frozen.meta).toBe("      ↳ ⏱ 15:00");
+  });
+});
+
+describe("sidebarLine", () => {
+  it("renders marker, label, elapsed and compact tokens", () => {
+    const line = sidebarLine(
+      row({
+        label: "explore",
+        outcome: "succeeded",
+        tokens: 12_400,
+        time: { created: T0, updated: T0 + 154_000 },
+      }),
+      T0 + 154_000,
+    );
+    expect(line).toBe("[✓] explore · 02:34 · 12.4k");
+  });
+
+  it("brackets the marker of every state, exactly as the panel does", () => {
+    const cases: readonly (readonly [Partial<SubagentRow>, string])[] = [
+      [{ status: "running" }, "review"],
+      [{ status: "idle" }, "docs"],
+      [{ outcome: "succeeded" }, "build"],
+      [{ outcome: "failed" }, "build"],
+      [{ outcome: "interrupted" }, "build"],
+      [{}, "plan"],
+    ];
+    for (const [overrides, label] of cases) {
+      expect(sidebarLine(row({ label, ...overrides }), T0)).toBe(`${MARKERS[stateOf(row(overrides), T0)].bracketed} ${label}`);
+    }
+  });
+
+  it("omits the elapsed when the row has no time, keeping the rest", () => {
+    expect(sidebarLine(row({ label: "docs", tokens: 3_100 }), T0)).toBe("[○] docs · 3.1k");
+  });
+
+  it("omits zero and non-finite token counts instead of printing 0", () => {
+    expect(sidebarLine(row({ label: "docs", tokens: 0 }), T0)).toBe("[○] docs");
+    for (const tokens of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(sidebarLine(row({ label: "docs", tokens }), T0)).toBe("[○] docs");
+    }
+  });
+
+  it("ends with the permission marker when one is waiting", () => {
+    const line = sidebarLine(
+      row({
+        label: "docs",
+        status: "running",
+        needsPermission: true,
+        tokens: 1_200,
+        time: { created: T0, updated: T0 },
+      }),
+      T0 + 3_000,
+    );
+    expect(line).toBe("[ ] docs · 00:03 · 1.2k ⚠");
+  });
+
+  it("keeps marker and label when the row has no metrics at all", () => {
+    expect(sidebarLine(row({ label: "plan" }), T0)).toBe("[○] plan");
+  });
+
+  it("keeps the running clock moving and freezes it once the outcome is set", () => {
+    const running = row({ label: "review", time: { created: T0, updated: T0 } });
+    expect(sidebarLine(running, T0 + 60_000)).toBe("[○] review · 01:00");
+    const done = row({ label: "review", outcome: "succeeded", time: { created: T0, updated: T0 + 900_000 } });
+    expect(sidebarLine(done, T0 + 3_600_000)).toBe("[✓] review · 15:00");
+  });
+
+  it("leaves the model, cost and context percentage to the panel", () => {
+    const line = sidebarLine(
+      row({
+        label: "explore",
+        model: "claude-sonnet-4-6",
+        cost: 0.04,
+        contextPercent: 37,
+        tokens: 12_400,
+        time: { created: T0, updated: T0 + 1 },
+      }),
+      T0 + 1,
+    );
+    expect(line).toBe("[○] explore · 00:00 · 12.4k");
   });
 });
 

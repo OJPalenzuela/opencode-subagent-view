@@ -73,6 +73,30 @@ j/k move · enter open · c completed · f fullscreen · esc close
 Keys are only active while the panel owns the keyboard, so typing `j` in the
 prompt keeps inserting text.
 
+## Sidebar glance
+
+Under the sidebar's own sections the plugin lists the three subagents that
+matter most, one line each:
+
+```
+[✓] explore · 02:34 · 12.4k
+[ ] review · 00:12 · 3.1k
+[○] docs · 00:03 · 1.2k ⚠
+```
+
+- **Three lines, never more.** The sidebar has no room to scroll, so this is a
+  glance; `/subagents` is the detailed view, with every subagent, the model, the
+  exact token count, the cost and the context window.
+- Same order as the panel: permission-pending first, then running, then the most
+  recent activity. Same markers too (`●` running, `◌` idle, `✓` done, `✕`
+  failed, `⊘` interrupted, `○` unknown), bracketed and colored by state.
+- Per line: the bracketed marker, the agent label, the elapsed time, and the
+  token count abbreviated (`12.4k`). `⚠` at the end means a permission request is
+  waiting. Anything missing is left out — no time, no tokens, still a line.
+- Cost, model and context percentage belong to the panel, not here.
+- Nothing is rendered when the session has no subagents: no placeholder, no
+  empty block.
+
 ## Completion alerts
 
 When a subagent of the session you are in finishes, the plugin announces it:
@@ -178,11 +202,12 @@ Restart the TUI after editing the config.
 | Completion alerts | Diffed per refresh; sound and notification only while blurred |
 | Alert priming | The first snapshot is a baseline, so a reload announces nothing |
 | Footer counters | `prompt.footer.status`, session id from the slot input; hidden with no session or no subagents |
+| Sidebar glance | `sidebar.content`, appended; top 3 rows of the panel's ordering, one `<text>` each, hidden when there are no subagents |
 
 > Whether both slots are actually published inside a *subagent* session view is
 > TUI-runtime behaviour that cannot be checked from a shell. Confirm the line
 > appears where you expect it in the live TUI, and try the other `slot` value if
-> it does not.
+> it does not. The same is true of the sidebar widget's placement.
 
 ## Development
 
@@ -196,8 +221,8 @@ Formatting logic lives in `src/format.ts`, the panel selectors in
 `src/subagents.ts`, the context-window math in `src/context.ts`, and the
 completion tracker and alert text in `src/alerts.ts`. All four are deliberately
 free of TUI imports, and every look-up is injected as a parameter, so they can be
-unit tested in isolation. `src/panel.tsx`, `src/footer.tsx` and `src/tui.tsx`
-only wire them to the host.
+unit tested in isolation. `src/panel.tsx`, `src/sidebar.tsx`, `src/footer.tsx`
+and `src/tui.tsx` only wire them to the host.
 
 ## Release
 

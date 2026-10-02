@@ -1,14 +1,14 @@
 // src/tui.tsx
-import { createComponent as _$createComponent3 } from "@opentui/solid";
-import { effect as _$effect3 } from "@opentui/solid";
+import { createComponent as _$createComponent4 } from "@opentui/solid";
+import { effect as _$effect4 } from "@opentui/solid";
 import { memo as _$memo } from "@opentui/solid";
 import { createTextNode as _$createTextNode2 } from "@opentui/solid";
 import { insertNode as _$insertNode2 } from "@opentui/solid";
-import { insert as _$insert3 } from "@opentui/solid";
-import { setProp as _$setProp3 } from "@opentui/solid";
-import { createElement as _$createElement3 } from "@opentui/solid";
+import { insert as _$insert4 } from "@opentui/solid";
+import { setProp as _$setProp4 } from "@opentui/solid";
+import { createElement as _$createElement4 } from "@opentui/solid";
 import { Plugin } from "@opencode/plugin/tui";
-import { Show as Show3, createEffect as createEffect2, createMemo as createMemo3, createSignal as createSignal2, onCleanup as onCleanup2 } from "solid-js";
+import { Show as Show4, createEffect as createEffect3, createMemo as createMemo4, createSignal as createSignal3, onCleanup as onCleanup3 } from "solid-js";
 
 // src/format.ts
 var STATE = {
@@ -149,6 +149,18 @@ function ensureMessages(context, sessionID) {
     void context.data.session.message.sync(sessionID).catch(() => {
     });
   } catch {
+  }
+}
+var SYNCED_PERMISSIONS = /* @__PURE__ */ new Set();
+function ensureSessions(context, sessionIDs) {
+  for (const sessionID of sessionIDs) {
+    if (!sessionID || SYNCED_PERMISSIONS.has(sessionID)) continue;
+    SYNCED_PERMISSIONS.add(sessionID);
+    try {
+      void context.data.session.permission.sync(sessionID).catch(() => {
+      });
+    } catch {
+    }
   }
 }
 function rowPercent(context, models, sessionID) {
@@ -345,6 +357,10 @@ function visibleRows(rows, showCompleted) {
   if (showCompleted) return [...rows];
   return rows.filter((row) => !FINISHED.has(stateOf(row)));
 }
+var SIDEBAR_LIMIT = 3;
+function topRows(rows) {
+  return orderRows(rows).slice(0, SIDEBAR_LIMIT);
+}
 function rowWindow(total, cursor, capacity, from = 0) {
   if (total <= 0) return { start: 0, end: 0 };
   const size = Math.min(Math.max(1, finite(capacity) ?? 0), total);
@@ -410,6 +426,16 @@ function rowParts(row, now) {
   const segments = head === "" ? rest : [head, ...rest];
   const metaLine = segments.length === 0 ? "" : `${" ".repeat(LABEL_COLUMN + INDENT.length * depth)}\u21B3 ${segments.join(SEPARATOR3)}`;
   return { state, label: labelLine, meta: metaLine };
+}
+function sidebarLine(row, now) {
+  const elapsed = elapsedMs(row, now);
+  const tokens = finite(row.tokens);
+  const head = `${MARKERS[stateOf(row, now)].bracketed} ${row.label}`;
+  const metrics = [
+    elapsed === void 0 ? "" : formatDuration(elapsed),
+    tokens === void 0 || tokens <= 0 ? "" : formatTokens(tokens)
+  ].filter((segment) => segment !== "");
+  return `${[head, ...metrics].join(SEPARATOR3)}${row.needsPermission ? ` ${PERMISSION_GLYPH}` : ""}`;
 }
 function headerSegments(total) {
   return [
@@ -554,10 +580,8 @@ function SubagentPanel(props) {
   createEffect(() => {
     const sessionID = panel.sessionID;
     const ids = [sessionID, ...collectSubagents(safeList2(context), sessionID).map((row) => row.id)];
-    void Promise.allSettled(ids.map((id) => {
-      ensureMessages(context, id);
-      return safeSync(context, id);
-    }));
+    for (const id of ids) ensureMessages(context, id);
+    ensureSessions(context, ids);
   });
   const stopPermission = context.data.on("permission.asked", (event) => {
     const sessionID = event.data?.sessionID;
@@ -742,9 +766,96 @@ function registerPanel(context, tick) {
   });
 }
 
+// src/sidebar.tsx
+import { effect as _$effect3 } from "@opentui/solid";
+import { insert as _$insert3 } from "@opentui/solid";
+import { createComponent as _$createComponent3 } from "@opentui/solid";
+import { setProp as _$setProp3 } from "@opentui/solid";
+import { createElement as _$createElement3 } from "@opentui/solid";
+import { createEffect as createEffect2, createMemo as createMemo3, createSignal as createSignal2, For as For2, onCleanup as onCleanup2, Show as Show3 } from "solid-js";
+var ELAPSED_TICK_MS2 = 1e3;
+function safeList3(context) {
+  try {
+    return context.data.session.list() ?? [];
+  } catch {
+    return [];
+  }
+}
+function safeStatusLookup2(context) {
+  return (sessionID) => {
+    try {
+      return context.data.session.status(sessionID);
+    } catch {
+      return void 0;
+    }
+  };
+}
+function safePermissionLookup2(context) {
+  return (sessionID) => {
+    try {
+      return (context.data.session.permission.list(sessionID) ?? []).length > 0;
+    } catch {
+      return false;
+    }
+  };
+}
+function SubagentGlance(props) {
+  const [now, setNow] = createSignal2(Date.now());
+  createEffect2(() => {
+    const timer = setInterval(() => setNow(Date.now()), ELAPSED_TICK_MS2);
+    onCleanup2(() => clearInterval(timer));
+  });
+  createEffect2(() => {
+    const sessionID = props.sessionID;
+    ensureSessions(props.context, [sessionID, ...collectSubagents(safeList3(props.context), sessionID).map((row) => row.id)]);
+  });
+  const rows = createMemo3(() => {
+    props.tick();
+    return topRows(collectSubagents(safeList3(props.context), props.sessionID, safeStatusLookup2(props.context), safePermissionLookup2(props.context)));
+  });
+  const line = (row) => sidebarLine(row, now());
+  const fg = (row) => {
+    const marker = MARKERS[stateOf(row, now())];
+    return resolveFg(props.context, marker.token, marker.fallback);
+  };
+  return _$createComponent3(Show3, {
+    get when() {
+      return rows().length > 0;
+    },
+    get children() {
+      var _el$ = _$createElement3("box");
+      _$setProp3(_el$, "flexDirection", "column");
+      _$insert3(_el$, _$createComponent3(For2, {
+        get each() {
+          return rows();
+        },
+        children: (row) => (() => {
+          var _el$2 = _$createElement3("text");
+          _$insert3(_el$2, () => line(row));
+          _$effect3((_$p) => _$setProp3(_el$2, "fg", fg(row), _$p));
+          return _el$2;
+        })()
+      }));
+      return _el$;
+    }
+  });
+}
+function registerSidebar(context, tick) {
+  return context.ui.slot({
+    append: "sidebar.content",
+    render: (input) => _$createComponent3(SubagentGlance, {
+      context,
+      get sessionID() {
+        return input.sessionID;
+      },
+      tick
+    })
+  });
+}
+
 // src/tui.tsx
 var PLUGIN_ID = "subagent-view";
-var ELAPSED_TICK_MS2 = 1e3;
+var ELAPSED_TICK_MS3 = 1e3;
 var REFRESH_COALESCE_MS = 200;
 var SLOT_DEFAULT = "session.composer.top";
 var SLOT_FOOTER = "prompt.footer.status";
@@ -764,7 +875,7 @@ function safeStatus(context, sessionID) {
     return void 0;
   }
 }
-function safeList3(context) {
+function safeList4(context) {
   try {
     return context.data.session.list() ?? [];
   } catch {
@@ -789,7 +900,7 @@ function currentSession(context) {
 function announceFinished(context, tracker, sessionID, now) {
   let finished;
   try {
-    finished = tracker.update(collectSubagents(safeList3(context), sessionID));
+    finished = tracker.update(collectSubagents(safeList4(context), sessionID));
   } catch {
     return;
   }
@@ -812,56 +923,56 @@ function announceFinished(context, tracker, sessionID, now) {
   }
 }
 function SubagentStatus(props) {
-  const [now, setNow] = createSignal2(Date.now());
-  createEffect2(() => {
-    const timer = setInterval(() => setNow(Date.now()), ELAPSED_TICK_MS2);
-    onCleanup2(() => clearInterval(timer));
+  const [now, setNow] = createSignal3(Date.now());
+  createEffect3(() => {
+    const timer = setInterval(() => setNow(Date.now()), ELAPSED_TICK_MS3);
+    onCleanup3(() => clearInterval(timer));
   });
-  createEffect2(() => {
+  createEffect3(() => {
     const sessionID = props.sessionID;
     if (!sessionID) return;
     props.context.data.session.sync(sessionID).catch(() => {
     });
   });
-  createEffect2(() => {
+  createEffect3(() => {
     ensureMessages(props.context, props.sessionID);
   });
-  const record = createMemo3(() => {
+  const record = createMemo4(() => {
     props.tick();
     return safeGet(props.context, props.sessionID);
   });
-  const isSubagent = createMemo3(() => {
+  const isSubagent = createMemo4(() => {
     now();
     return Boolean(record()?.parentID);
   });
-  const summary = createMemo3(() => buildSummary({
+  const summary = createMemo4(() => buildSummary({
     ...record(),
     // `undefined` until both lists hold a usable pair, which is what drops
     // the segment instead of printing a misleading `0% ctx`.
     contextPercent: rowPercent(props.context, safeModels2(props.context), props.sessionID)
   }, now(), safeStatus(props.context, props.sessionID)));
   const marker = () => MARKERS[summary().state];
-  return _$createComponent3(Show3, {
+  return _$createComponent4(Show4, {
     get when() {
       return isSubagent();
     },
     get children() {
-      var _el$ = _$createElement3("box"), _el$2 = _$createElement3("text"), _el$3 = _$createElement3("text"), _el$4 = _$createTextNode2(` `), _el$5 = _$createElement3("text");
+      var _el$ = _$createElement4("box"), _el$2 = _$createElement4("text"), _el$3 = _$createElement4("text"), _el$4 = _$createTextNode2(` `), _el$5 = _$createElement4("text");
       _$insertNode2(_el$, _el$2);
       _$insertNode2(_el$, _el$3);
       _$insertNode2(_el$, _el$5);
-      _$setProp3(_el$, "flexDirection", "row");
-      _$insert3(_el$2, () => marker().glyph);
+      _$setProp4(_el$, "flexDirection", "row");
+      _$insert4(_el$2, () => marker().glyph);
       _$insertNode2(_el$3, _el$4);
-      _$insert3(_el$3, () => summary().label, null);
-      _$insert3(_el$5, (() => {
+      _$insert4(_el$3, () => summary().label, null);
+      _$insert4(_el$5, (() => {
         var _c$ = _$memo(() => !!summary().text);
         return () => _c$() ? ` ${summary().text}` : "";
       })());
-      _$effect3((_p$) => {
+      _$effect4((_p$) => {
         var _v$ = resolveFg(props.context, marker().token, marker().fallback), _v$2 = resolveFg(props.context, SUBDUED_TOKEN, SUBDUED_FALLBACK);
-        _v$ !== _p$.e && (_p$.e = _$setProp3(_el$2, "fg", _v$, _p$.e));
-        _v$2 !== _p$.t && (_p$.t = _$setProp3(_el$5, "fg", _v$2, _p$.t));
+        _v$ !== _p$.e && (_p$.e = _$setProp4(_el$2, "fg", _v$, _p$.e));
+        _v$2 !== _p$.t && (_p$.t = _$setProp4(_el$5, "fg", _v$2, _p$.t));
         return _p$;
       }, {
         e: void 0,
@@ -875,7 +986,7 @@ function resolveSlot(value) {
   return value === SLOT_FOOTER ? SLOT_FOOTER : SLOT_DEFAULT;
 }
 function renderStatus(context, sessionID, tick) {
-  return _$createComponent3(SubagentStatus, {
+  return _$createComponent4(SubagentStatus, {
     context,
     sessionID: sessionID ?? "",
     tick
@@ -901,7 +1012,7 @@ function PanelCommand(props) {
 var tui_default = Plugin.define({
   id: PLUGIN_ID,
   setup(context) {
-    const [tick, setTick] = createSignal2(0);
+    const [tick, setTick] = createSignal3(0);
     let lastRefreshAt = 0;
     const tracker = createCompletionTracker();
     const requestRefresh = () => {
@@ -928,9 +1039,10 @@ var tui_default = Plugin.define({
     });
     const releasePanel = registerPanel(context, tick);
     const releaseFooter = registerFooter(context, tick);
+    const releaseSidebar = registerSidebar(context, tick);
     const releaseCommand = context.ui.slot({
       append: "app",
-      render: () => _$createComponent3(PanelCommand, {
+      render: () => _$createComponent4(PanelCommand, {
         context
       })
     });
@@ -939,6 +1051,7 @@ var tui_default = Plugin.define({
       release?.();
       releasePanel?.();
       releaseFooter?.();
+      releaseSidebar?.();
       releaseCommand?.();
     };
   }

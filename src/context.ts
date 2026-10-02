@@ -185,6 +185,44 @@ export function ensureMessages(context: MessageCache, sessionID: string | undefi
   }
 }
 
+/** The one host call warming a permission cache needs, as a subset of `Context`. */
+export interface PermissionSync {
+  readonly data: {
+    readonly session: {
+      readonly permission: {
+        readonly sync: (sessionID: string) => Promise<unknown>;
+      };
+    };
+  };
+}
+
+/** Sessions already asked for their pending permissions, this plugin generation. */
+const SYNCED_PERMISSIONS = new Set<string>();
+
+/**
+ * Ask for a batch of sessions' pending permissions, at most once per session per
+ * plugin generation.
+ *
+ * `permission.list` is a cache read, and the host only fills it for the session
+ * you are in: a subagent blocked on a permission answers "none" until someone
+ * syncs it, which would hide the one signal a user must not miss. Both the
+ * panel rows and the sidebar widget read that cache, so both ask here instead of
+ * each carrying its own copy. Empty and repeated ids are skipped, and both a
+ * synchronous throw and a rejected promise are swallowed: a session whose
+ * permissions cannot be loaded simply has no `⚠`.
+ */
+export function ensureSessions(context: PermissionSync, sessionIDs: readonly string[]): void {
+  for (const sessionID of sessionIDs) {
+    if (!sessionID || SYNCED_PERMISSIONS.has(sessionID)) continue;
+    SYNCED_PERMISSIONS.add(sessionID);
+    try {
+      void context.data.session.permission.sync(sessionID).catch(() => {});
+    } catch {
+      // No permissions, no marker — never an error.
+    }
+  }
+}
+
 /**
  * A row's `contextPercent`, from the model list every caller already holds and
  * that session's message cache. One place, so the line and a panel row can never

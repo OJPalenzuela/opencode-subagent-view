@@ -11,7 +11,7 @@
 import type { Context, PanelInput } from "@opencode/plugin/tui/context";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import { COMMAND_IDS } from "./commands.js";
-import { ensureMessages, rowPercent } from "./context.js";
+import { ensureMessages, ensureSessions, rowPercent } from "./context.js";
 import type { ModelInfoLike } from "./context.js";
 import type { State } from "./format.js";
 import {
@@ -148,17 +148,13 @@ function SubagentPanel(props: {
   // The rows are the panel, so their sessions must have their pending permission
   // requests and their messages cached before the first read: the host only loads
   // the transcript of the session you are in, so a row for a subagent you have
-  // not opened has nothing to read otherwise. `Promise.allSettled` keeps one
-  // failing session from taking the rest of the panel down.
+  // not opened has nothing to read otherwise. Both helpers ask once per session
+  // per generation and never reject, so one session cannot take the rest down.
   createEffect(() => {
     const sessionID = panel.sessionID;
     const ids = [sessionID, ...collectSubagents(safeList(context), sessionID).map((row) => row.id)];
-    void Promise.allSettled(
-      ids.map((id) => {
-        ensureMessages(context, id);
-        return safeSync(context, id);
-      }),
-    );
+    for (const id of ids) ensureMessages(context, id);
+    ensureSessions(context, ids);
   });
 
   // `list()` is a cache read: a request asked after the panel opened would stay

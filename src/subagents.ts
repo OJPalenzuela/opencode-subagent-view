@@ -16,6 +16,7 @@ import {
   formatDuration,
   formatExactTokens,
   formatPercent,
+  formatTokens,
 } from "./format.js";
 import type { Outcome, SessionLike, SessionStatus, SessionTime, State } from "./format.js";
 import { CURRENT_GLYPH, MARKERS, PERMISSION_GLYPH } from "./theme.js";
@@ -192,6 +193,21 @@ export function visibleRows(rows: readonly SubagentRow[], showCompleted: boolean
   return rows.filter((row) => !FINISHED.has(stateOf(row)));
 }
 
+/** How many subagents the sidebar widget lists before `/subagents` takes over. */
+export const SIDEBAR_LIMIT = 3;
+
+/**
+ * The head of the panel's own ordering, for a widget with no room to scroll.
+ *
+ * `orderRows` decides the ranking — permission-pending first, then running, then
+ * the most recent activity — so the sidebar and the panel cannot disagree about
+ * which subagent matters most. It is idempotent, so re-ordering already ordered
+ * rows changes nothing.
+ */
+export function topRows(rows: readonly SubagentRow[]): SubagentRow[] {
+  return orderRows(rows).slice(0, SIDEBAR_LIMIT);
+}
+
 /** Half-open range `[start, end)` of the rows currently shown. */
 export interface RowWindow {
   readonly start: number;
@@ -332,6 +348,30 @@ export function rowParts(row: SubagentRow, now: number): RowParts {
     : `${" ".repeat(LABEL_COLUMN + INDENT.length * depth)}↳ ${segments.join(SEPARATOR)}`;
 
   return { state, label: labelLine, meta: metaLine };
+}
+
+/**
+ * One subagent as one line: `[✓] explore · 02:34 · 12.4k`.
+ *
+ * The sidebar's whole budget per subagent. Same `bracketed` marker as the panel
+ * row, elapsed without the `⏱` (there is no room for the icon), and tokens
+ * abbreviated instead of exact, since the panel is the view that has the width
+ * to be precise. Missing data is omitted rather than filled: a row with no time
+ * and no tokens is still its marker and its label. `⚠` stays last, as on the
+ * panel's label line — a state signal, not a metric.
+ */
+export function sidebarLine(row: SubagentRow, now: number): string {
+  const elapsed = elapsedMs(row, now);
+  const tokens = finite(row.tokens);
+  // The marker labels the subagent, so it is separated by a space; the metrics
+  // are a list of their own and carry the shared separator. `⚠` hangs off the
+  // end with a space, as on the panel's label line.
+  const head = `${MARKERS[stateOf(row, now)].bracketed} ${row.label}`;
+  const metrics = [
+    elapsed === undefined ? "" : formatDuration(elapsed),
+    tokens === undefined || tokens <= 0 ? "" : formatTokens(tokens),
+  ].filter((segment) => segment !== "");
+  return `${[head, ...metrics].join(SEPARATOR)}${row.needsPermission ? ` ${PERMISSION_GLYPH}` : ""}`;
 }
 
 /** Header counts as three separately colored segments: `● 2 run`, `✓ 1 done`, `✕ 0 err`. */

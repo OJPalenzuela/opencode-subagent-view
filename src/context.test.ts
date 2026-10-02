@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { contextUsage, ensureMessages, findModelInfo, rowPercent, usagePercent } from "./context.js";
-import type { MessageCache, MessageLike, MessageTokens, ModelInfoLike } from "./context.js";
+import { contextUsage, ensureMessages, ensureSessions, findModelInfo, rowPercent, usagePercent } from "./context.js";
+import type { MessageCache, MessageLike, MessageTokens, ModelInfoLike, PermissionSync } from "./context.js";
 
 function info(id: string, providerID: string, limit: number, modelID = id): ModelInfoLike {
   return { id, modelID, providerID, limit: { context: limit } };
@@ -16,6 +16,21 @@ function host(
         message: { list: () => [], sync: () => Promise.resolve(), ...message },
       },
     },
+  };
+}
+
+/** Minimal stand-in for the host permission sync: no TUI, no data layer. */
+function permissionHost(
+  sync: PermissionSync["data"]["session"]["permission"]["sync"],
+): PermissionSync {
+  return { data: { session: { permission: { sync } } } };
+}
+
+/** Records every id asked for, so "asked exactly once" is observable. */
+function recorder(asked: string[]): PermissionSync["data"]["session"]["permission"]["sync"] {
+  return (sessionID) => {
+    asked.push(sessionID);
+    return Promise.resolve();
   };
 }
 
@@ -215,5 +230,46 @@ describe("ensureMessages", () => {
     });
     expect(() => ensureMessages(context, "ses_throw")).not.toThrow();
     expect(() => ensureMessages(context, undefined)).not.toThrow();
+  });
+});
+
+describe("ensureSessions", () => {
+  it("syncs every id, and syncs nothing on a second call with the same ids", () => {
+    const asked: string[] = [];
+    const context = permissionHost(recorder(asked));
+
+    ensureSessions(context, ["s1_a", "s1_b", "s1_c"]);
+    expect(asked).toEqual(["s1_a", "s1_b", "s1_c"]);
+
+    ensureSessions(context, ["s1_a", "s1_b", "s1_c"]);
+    expect(asked).toEqual(["s1_a", "s1_b", "s1_c"]);
+  });
+
+  it("ignores empty ids and syncs a repeated id once", () => {
+    const asked: string[] = [];
+    const context = permissionHost(recorder(asked));
+
+    ensureSessions(context, ["s2_a", "", "s2_a", "s2_b", ""]);
+    expect(asked).toEqual(["s2_a", "s2_b"]);
+  });
+
+  it("syncs a new session independently of the ones already synced", () => {
+    const asked: string[] = [];
+    const context = permissionHost(recorder(asked));
+
+    ensureSessions(context, ["s3_a"]);
+    ensureSessions(context, ["s3_a", "s3_b"]);
+    expect(asked).toEqual(["s3_a", "s3_b"]);
+  });
+
+  it("does not throw when a sync rejects, when it throws, or on no ids", () => {
+    const rejecting = permissionHost(() => Promise.reject(new Error("no such session")));
+    expect(() => ensureSessions(rejecting, ["s4_reject"])).not.toThrow();
+
+    const throwing = permissionHost(() => {
+      throw new Error("data layer gone");
+    });
+    expect(() => ensureSessions(throwing, ["s4_throw"])).not.toThrow();
+    expect(() => ensureSessions(throwing, [])).not.toThrow();
   });
 });

@@ -1,7 +1,8 @@
 /**
  * OpenCode v2 TUI plugin: live stats for the subagent session you are inside,
- * plus the `/subagents` panel listing every subagent of the root session, a
- * count on the home footer, and an alert when a subagent finishes.
+ * plus the `/subagents` panel listing every subagent of the root session, the
+ * top few of them in the sidebar, a count on the home footer, and an alert when
+ * a subagent finishes.
  *
  * When the routed session is a subagent session (`parentID` set), this renders a
  * single line above the composer — state dot, agent label, model, elapsed time,
@@ -24,6 +25,7 @@ import type { CompletionTracker, FinishedSubagent } from "./alerts.js";
 import { COMMAND_IDS } from "./commands.js";
 import { registerFooter } from "./footer.js";
 import { PANEL_NAME, registerPanel } from "./panel.js";
+import { registerSidebar } from "./sidebar.js";
 import { collectSubagents } from "./subagents.js";
 import type { SubagentSession } from "./subagents.js";
 import { MARKERS, resolveFg, SUBDUED_FALLBACK, SUBDUED_TOKEN } from "./theme.js";
@@ -273,6 +275,7 @@ export default Plugin.define({
       });
     const releasePanel = registerPanel(context, tick);
     const releaseFooter = registerFooter(context, tick);
+    const releaseSidebar = registerSidebar(context, tick);
     const releaseCommand = context.ui.slot({
       append: "app",
       render: () => <PanelCommand context={context} />,
@@ -283,6 +286,7 @@ export default Plugin.define({
       release?.();
       releasePanel?.();
       releaseFooter?.();
+      releaseSidebar?.();
       releaseCommand?.();
     };
   },
