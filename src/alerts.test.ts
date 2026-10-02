@@ -12,8 +12,14 @@ function row(overrides: Partial<SubagentRow> = {}): SubagentRow {
     needsPermission: false,
     isCurrent: false,
     depth: 1,
+    time: { created: T0, updated: T0 },
     ...overrides,
   };
+}
+
+/** Started at the row terminal time by default, so a sighting counts as news. */
+function watch(startedAt = T0) {
+  return createCompletionTracker({ startedAt });
 }
 
 /** A row the tracker would have returned: terminal outcome guaranteed. */
@@ -36,17 +42,31 @@ function ids(rows: readonly SubagentRow[]): string[] {
 
 describe("createCompletionTracker priming", () => {
   it("fires nothing on the first snapshot, even when rows already finished", () => {
-    const tracker = createCompletionTracker();
+    // Reload: every outcome predates the plugin start.
+    const tracker = watch(T0 + 60_000);
     const rows = [row({ id: "ses_a", outcome: "succeeded" }), row({ id: "ses_b", outcome: "failed" })];
     expect(tracker.update(rows)).toEqual([]);
   });
 
-  it("keeps priming while the tree is still empty", () => {
-    const tracker = createCompletionTracker();
-    expect(tracker.update([])).toEqual([]);
+  it("fires a first sighting that finished after the plugin started", () => {
+    const tracker = watch();
+    const fired = tracker.update([row({ id: "ses_a", outcome: "succeeded" })]);
+    expect(ids(fired)).toEqual(["ses_a"]);
+    expect(fired[0]?.outcome).toBe("succeeded");
     expect(tracker.update([row({ id: "ses_a", outcome: "succeeded" })])).toEqual([]);
-    // Only now is the baseline armed.
-    expect(tracker.update([row({ id: "ses_b", outcome: "failed" })])).toHaveLength(1);
+  });
+
+  it("fires a completion missed while the tree was still empty", () => {
+    const tracker = watch();
+    expect(tracker.update([])).toEqual([]);
+    expect(ids(tracker.update([row({ id: "ses_a", outcome: "failed" })]))).toEqual(["ses_a"]);
+  });
+
+  it("treats a first sighting with no time data as history", () => {
+    const tracker = watch();
+    const blind = row({ id: "ses_a", outcome: "succeeded", time: undefined });
+    expect(() => tracker.update([blind])).not.toThrow();
+    expect(tracker.update([blind])).toEqual([]);
   });
 
   it("does not storm after a reload on a tree that is already done", () => {
@@ -55,7 +75,7 @@ describe("createCompletionTracker priming", () => {
       row({ id: "ses_b", outcome: "failed" }),
       row({ id: "ses_c", outcome: "interrupted" }),
     ];
-    const reloaded = createCompletionTracker();
+    const reloaded = watch(T0 + 60_000);
     reloaded.update(finished);
     expect(reloaded.update(finished)).toEqual([]);
     expect(reloaded.update(finished)).toEqual([]);
@@ -64,7 +84,7 @@ describe("createCompletionTracker priming", () => {
 
 describe("createCompletionTracker transitions", () => {
   it("fires exactly once when a row reaches a terminal outcome", () => {
-    const tracker = createCompletionTracker();
+    const tracker = watch();
     tracker.update(threeRunning());
 
     const fired = tracker.update([
@@ -78,7 +98,7 @@ describe("createCompletionTracker transitions", () => {
   });
 
   it("fires nothing when the same rows come back unchanged", () => {
-    const tracker = createCompletionTracker();
+    const tracker = watch();
     const rows = threeRunning();
     tracker.update(rows);
     const done = [rows[0]!, row({ id: "ses_b", label: "review", outcome: "failed" }), rows[2]!];
@@ -88,7 +108,7 @@ describe("createCompletionTracker transitions", () => {
   });
 
   it("fires a row that finished between two refreshes", () => {
-    const tracker = createCompletionTracker();
+    const tracker = watch();
     tracker.update(threeRunning());
     const fired = tracker.update([
       threeRunning()[0]!,
@@ -99,7 +119,7 @@ describe("createCompletionTracker transitions", () => {
   });
 
   it("never re-fires a terminal row when its data changes", () => {
-    const tracker = createCompletionTracker();
+    const tracker = watch();
     tracker.update(threeRunning());
     const first = tracker.update([row({ id: "ses_b", label: "review", outcome: "succeeded", tokens: 10 })]);
     expect(ids(first)).toEqual(["ses_b"]);
@@ -111,7 +131,7 @@ describe("createCompletionTracker transitions", () => {
   });
 
   it("returns every newly finished row in input order", () => {
-    const tracker = createCompletionTracker();
+    const tracker = watch();
     tracker.update(threeRunning());
     const fired = tracker.update([
       row({ id: "ses_c", label: "plan", outcome: "failed" }),
@@ -121,19 +141,38 @@ describe("createCompletionTracker transitions", () => {
     expect(ids(fired)).toEqual(["ses_c", "ses_a", "ses_b"]);
   });
 
-  it("forgets rows that leave the tree", () => {
-    const tracker = createCompletionTracker();
+  it("keeps memory through an empty snapshot", () => {
+    const tracker = watch();
     tracker.update(threeRunning());
-    tracker.update([row({ id: "ses_b", label: "review", outcome: "succeeded" })]);
+    const fired = row({ id: "ses_b", label: "review", outcome: "succeeded" });
+    expect(ids(tracker.update([fired]))).toEqual(["ses_b"]);
     expect(tracker.update([])).toEqual([]);
-    // Gone from the map, so it is a new row again rather than a memory leak.
-    expect(ids(tracker.update([row({ id: "ses_b", label: "review", outcome: "succeeded" })]))).toEqual([
-      "ses_b",
+    // A snapshot missing the row must not make it news again.
+    expect(tracker.update([fired])).toEqual([]);
+  });
+
+  it("keeps memory through a partial snapshot", () => {
+    const tracker = watch();
+    tracker.update(threeRunning());
+    const a = row({ id: "ses_a", outcome: "succeeded" });
+    const b = row({ id: "ses_b", outcome: "failed" });
+    expect(ids(tracker.update([a, b]))).toEqual(["ses_a", "ses_b"]);
+    expect(tracker.update([a])).toEqual([]);
+    expect(tracker.update([a, b])).toEqual([]);
+  });
+
+  it("does not re-fire after a switch to another root and back", () => {
+    const tracker = watch();
+    const mine = row({ id: "ses_a", outcome: "succeeded" });
+    expect(ids(tracker.update([mine]))).toEqual(["ses_a"]);
+    expect(ids(tracker.update([row({ id: "ses_x", label: "docs", outcome: "interrupted" })]))).toEqual([
+      "ses_x",
     ]);
+    expect(tracker.update([mine])).toEqual([]);
   });
 
   it("survives partial rows and skips unusable ids", () => {
-    const tracker = createCompletionTracker();
+    const tracker = watch();
     tracker.update([row({ id: "ses_run" })]);
     const partial = [
       undefined,
@@ -148,7 +187,7 @@ describe("createCompletionTracker transitions", () => {
   });
 
   it("still reports a real row out of a batch of partial ones", () => {
-    const tracker = createCompletionTracker();
+    const tracker = watch();
     tracker.update([row({ id: "ses_run" })]);
     const partial = [
       undefined,
@@ -160,7 +199,7 @@ describe("createCompletionTracker transitions", () => {
   });
 
   it("ignores an outcome it does not know", () => {
-    const tracker = createCompletionTracker();
+    const tracker = watch();
     tracker.update(threeRunning());
     // A server this build predates: the string is outside `Outcome`.
     const bogus = { ...row({ id: "ses_b" }), outcome: "exploded" } as unknown as SubagentRow;
@@ -200,7 +239,7 @@ describe("finishedMessage", () => {
   });
 
   it("keeps the outcome alone when no metric is available", () => {
-    expect(finishedMessage(finished({ outcome: "interrupted" }), T0)).toBe("interrupted");
+    expect(finishedMessage(finished({ outcome: "interrupted", time: undefined }), T0)).toBe("interrupted");
   });
 
   it("omits zeroed or missing metrics", () => {

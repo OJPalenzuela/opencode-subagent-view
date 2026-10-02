@@ -211,8 +211,7 @@ export default Plugin.define({
   setup(context) {
     const [tick, setTick] = createSignal(0);
     let lastRefreshAt = 0;
-    let tracker = createCompletionTracker();
-    let trackedSession = "";
+    const tracker = createCompletionTracker();
 
     const requestRefresh = () => {
       const stamp = Date.now();
@@ -220,18 +219,12 @@ export default Plugin.define({
       lastRefreshAt = stamp;
       setTick((value) => value + 1);
 
-      // Off a session route there is no root to watch. Staying unarmed matters:
-      // a reload on the home screen must not make the first session it sees
-      // replay every subagent that already finished.
+      // Alerts cover the subagents of the session you are in. One tracker for
+      // the whole generation, so switching roots loses nothing: a subagent that
+      // finished after the plugin started is announced when you come back,
+      // and one that finished before it started stays history.
       const sessionID = currentSession(context);
       if (sessionID === undefined) return;
-
-      // A different tree gets a fresh baseline instead of announcing all of its
-      // finished subagents. Moving between sessions of one root is the price.
-      if (sessionID !== trackedSession) {
-        tracker = createCompletionTracker();
-        trackedSession = sessionID;
-      }
       announceFinished(context, tracker, sessionID, stamp);
     };
 

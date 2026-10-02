@@ -69,9 +69,10 @@ middle of a prompt. OpenCode handles the focus check.
 
 Alerts are diffed against the previous refresh, one per finished subagent:
 
-- A reload or TUI restart never replays subagents that already finished.
+- A subagent that finished after the plugin started is announced, including one
+  you were not looking at when it finished. One that finished before the plugin
+  started is treated as history, so a reload or TUI restart stays quiet.
 - The same subagent is announced once, however much its numbers change after.
-- A subagent that was created and finished between two refreshes still counts.
 
 ## Footer counters
 

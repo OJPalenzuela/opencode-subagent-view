@@ -102,6 +102,9 @@ var SEPARATOR2 = " \xB7 ";
 function alertedOutcome(row) {
   return row.outcome !== void 0 && ALERTED.has(row.outcome) ? row.outcome : void 0;
 }
+function endedAt(row) {
+  return finite(row.time?.idle) ?? finite(row.time?.updated);
+}
 function finishedMessage(row, now) {
   const parts = [row.outcome];
   const elapsed = elapsedMs(row, now);
@@ -110,26 +113,22 @@ function finishedMessage(row, now) {
   if (row.cost !== void 0 && row.cost > 0) parts.push(formatCost(row.cost));
   return parts.join(SEPARATOR2);
 }
-function createCompletionTracker() {
-  let seen = /* @__PURE__ */ new Map();
-  let armed = false;
+function createCompletionTracker(options = {}) {
+  const startedAt = options.startedAt ?? Date.now();
+  const seen = /* @__PURE__ */ new Map();
   return {
     update(rows) {
       const finished = [];
-      let snapshot;
       for (const row of rows) {
         if (typeof row?.id !== "string" || row.id === "") continue;
-        const next = snapshot ?? /* @__PURE__ */ new Map();
-        snapshot = next;
         const outcome = alertedOutcome(row);
         const previous = seen.get(row.id);
-        next.set(row.id, outcome ?? previous);
-        if (outcome !== void 0 && previous === void 0 && armed) {
-          finished.push({ ...row, outcome });
-        }
+        seen.set(row.id, outcome ?? previous);
+        if (outcome === void 0) continue;
+        const ended = endedAt(row);
+        const isNews = previous !== void 0 ? previous !== outcome : ended !== void 0 && ended >= startedAt;
+        if (isNews) finished.push({ ...row, outcome });
       }
-      seen = snapshot ?? /* @__PURE__ */ new Map();
-      if (snapshot !== void 0 && snapshot.size > 0) armed = true;
       return finished;
     }
   };
@@ -720,8 +719,7 @@ var tui_default = Plugin.define({
   setup(context) {
     const [tick, setTick] = createSignal2(0);
     let lastRefreshAt = 0;
-    let tracker = createCompletionTracker();
-    let trackedSession = "";
+    const tracker = createCompletionTracker();
     const requestRefresh = () => {
       const stamp = Date.now();
       if (stamp - lastRefreshAt < REFRESH_COALESCE_MS) return;
@@ -729,10 +727,6 @@ var tui_default = Plugin.define({
       setTick((value) => value + 1);
       const sessionID = currentSession(context);
       if (sessionID === void 0) return;
-      if (sessionID !== trackedSession) {
-        tracker = createCompletionTracker();
-        trackedSession = sessionID;
-      }
       announceFinished(context, tracker, sessionID, stamp);
     };
     const stopEvents = context.data.listen(requestRefresh);
