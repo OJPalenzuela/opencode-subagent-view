@@ -25,9 +25,10 @@ output + reasoning) against the model's declared context limit.
 - The percentage is never clamped, so an over-long session reads `128% ctx`
   instead of a reassuring `100`.
 - It appears only when the data exists: the session's messages must be loaded and
-  the model must be one the plugin's provider knows. Until then the segment is
-  simply absent rather than `0% ctx`.
-- It shows on the status line and on each panel row that has the data.
+  the model must be one the plugin's provider knows. The plugin asks each
+  session's messages once per plugin generation, so a panel row shows the segment
+  as soon as that data lands; until then it is simply absent, not `0% ctx`.
+- It shows on the status line and on every panel row whose data is loaded.
 
 ## Subagents panel
 
@@ -49,7 +50,9 @@ j/k move · enter open · c completed · f fullscreen · esc close
   done, failed and interrupted are hidden by `c`.
 - Rows are indented by depth, so nested subagents sit under their parent.
 - `NN% ctx` is the [context window](#context-window) of that session's most
-  recent request, last segment, and only on rows whose data is loaded.
+  recent request, last segment. The panel asks each row's session for its
+  messages once per generation, so a row shows it once that data is available —
+  rows whose session has no loaded messages simply have no such segment.
 - ⚠ marks a session with a permission request waiting for an answer.
 - `›` marks the session you are currently in.
 - The first rows are the ones that need you: pending permissions, then running,

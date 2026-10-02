@@ -1,9 +1,10 @@
 /**
  * Pure context-window math.
  *
- * No TUI imports and no plugin context: the model list and the message list are
- * injected as parameters, and a partial list degrades to `undefined` instead of
- * throwing, so this stays unit testable in isolation.
+ * No TUI imports: the model list is injected as a parameter and the plugin
+ * context is only read through the structural subset `MessageCache`, so a fake
+ * object is enough to test against. A partial list degrades to `undefined`
+ * instead of throwing, so this stays unit testable in isolation.
  *
  * Every shape below is a structural subset of the v2 data layer types
  * (`ModelRef`, `ModelInfo`, `TokenUsageInfo`, `SessionMessageInfo`). Only the
@@ -146,4 +147,59 @@ export function usagePercent(
   messages: readonly MessageLike[] | undefined,
 ): number | undefined {
   return contextUsage(messages, findModelInfo(models, lastRequest(messages)?.model)?.limit?.context)?.percent;
+}
+
+/** The two host calls a context segment needs, as a structural subset of `Context`. */
+export interface MessageCache {
+  readonly data: {
+    readonly session: {
+      readonly message: {
+        readonly list: (sessionID: string) => readonly MessageLike[] | undefined;
+        readonly sync: (sessionID: string) => Promise<unknown>;
+      };
+    };
+  };
+}
+
+/** Sessions already asked for their messages, for this plugin generation. */
+const SYNCED_MESSAGES = new Set<string>();
+
+/**
+ * Ask for one session's messages, at most once per plugin generation.
+ *
+ * Messages live in their own cache, so `session.sync` does not fill them, and the
+ * host only loads the transcript of the session you are in — a panel row for a
+ * subagent you never opened has nothing to read otherwise. Syncing per refresh
+ * tick would be a request per tick, so the guard is a module-level Set; after the
+ * first ask the data layer keeps the cache current itself. Both a synchronous
+ * throw and a rejected promise are swallowed: a session whose messages cannot be
+ * loaded simply has no `NN% ctx`.
+ */
+export function ensureMessages(context: MessageCache, sessionID: string | undefined): void {
+  if (!sessionID || SYNCED_MESSAGES.has(sessionID)) return;
+  SYNCED_MESSAGES.add(sessionID);
+  try {
+    void context.data.session.message.sync(sessionID).catch(() => {});
+  } catch {
+    // No messages, no segment — never an error.
+  }
+}
+
+/**
+ * A row's `contextPercent`, from the model list every caller already holds and
+ * that session's message cache. One place, so the line and a panel row can never
+ * disagree; `undefined` when the data is not computable, exactly as
+ * `usagePercent` documents.
+ */
+export function rowPercent(
+  context: MessageCache,
+  models: readonly ModelInfoLike[] | undefined,
+  sessionID: string | undefined,
+): number | undefined {
+  if (!sessionID) return undefined;
+  try {
+    return usagePercent(models, context.data.session.message.list(sessionID) ?? []);
+  } catch {
+    return undefined;
+  }
 }

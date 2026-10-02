@@ -11,8 +11,8 @@
 import type { Context, PanelInput } from "@opencode/plugin/tui/context";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import { COMMAND_IDS } from "./commands.js";
-import { usagePercent } from "./context.js";
-import type { MessageLike, ModelInfoLike } from "./context.js";
+import { ensureMessages, rowPercent } from "./context.js";
+import type { ModelInfoLike } from "./context.js";
 import { collectSubagents, counts, headerLine, orderRows, rowLine, stateOf, visibleRows } from "./subagents.js";
 import type {
   PermissionLookup,
@@ -85,15 +85,6 @@ function safeModels(context: Context): ModelInfoLike[] {
   }
 }
 
-/** That session's loaded messages; empty when the host has not loaded them. */
-function safeMessages(context: Context, sessionID: string): MessageLike[] {
-  try {
-    return (context.data.session.message.list(sessionID) ?? []) as MessageLike[];
-  } catch {
-    return [];
-  }
-}
-
 function SubagentPanel(props: {
   readonly context: Context;
   readonly panel: PanelInput;
@@ -115,9 +106,9 @@ function SubagentPanel(props: {
   const rows = createMemo(() => {
     props.tick();
     now();
-    // One model list for every row. Messages are read from the cache the host
-    // already filled for the sessions it has loaded, never requested here: a
-    // row whose data is missing shows no percentage rather than a wrong one.
+    // One model list for every row; each row's percentage comes from its own
+    // session's message cache, which the sync effect below asks for. A row whose
+    // data is missing shows no percentage rather than a wrong one.
     const models = safeModels(context);
     const collected = orderRows(
       visibleRows(
@@ -132,17 +123,24 @@ function SubagentPanel(props: {
     );
     return collected.map((row) => ({
       ...row,
-      contextPercent: usagePercent(models, safeMessages(context, row.id)),
+      contextPercent: rowPercent(context, models, row.id),
     }));
   });
 
-  // The rows are the panel, so their sessions must have their pending
-  // permission requests cached before the first read. `Promise.allSettled`
-  // keeps one failing session from taking the rest of the panel down.
+  // The rows are the panel, so their sessions must have their pending permission
+  // requests and their messages cached before the first read: the host only loads
+  // the transcript of the session you are in, so a row for a subagent you have
+  // not opened has nothing to read otherwise. `Promise.allSettled` keeps one
+  // failing session from taking the rest of the panel down.
   createEffect(() => {
     const sessionID = panel.sessionID;
     const ids = [sessionID, ...collectSubagents(safeList(context), sessionID).map((row) => row.id)];
-    void Promise.allSettled(ids.map((id) => safeSync(context, id)));
+    void Promise.allSettled(
+      ids.map((id) => {
+        ensureMessages(context, id);
+        return safeSync(context, id);
+      }),
+    );
   });
 
   // `list()` is a cache read: a request asked after the panel opened would stay

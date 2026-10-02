@@ -1,9 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { contextUsage, findModelInfo, usagePercent } from "./context.js";
-import type { MessageLike, MessageTokens, ModelInfoLike } from "./context.js";
+import { contextUsage, ensureMessages, findModelInfo, rowPercent, usagePercent } from "./context.js";
+import type { MessageCache, MessageLike, MessageTokens, ModelInfoLike } from "./context.js";
 
 function info(id: string, providerID: string, limit: number, modelID = id): ModelInfoLike {
   return { id, modelID, providerID, limit: { context: limit } };
+}
+
+/** Minimal stand-in for the host message cache: no TUI, no data layer. */
+function host(
+  message: Partial<MessageCache["data"]["session"]["message"]> = {},
+): MessageCache {
+  return {
+    data: {
+      session: {
+        message: { list: () => [], sync: () => Promise.resolve(), ...message },
+      },
+    },
+  };
 }
 
 function assistant(tokens?: MessageTokens): MessageLike {
@@ -148,5 +161,59 @@ describe("usagePercent", () => {
         { type: "assistant", model: { id: "unknown", providerID: "openai" }, tokens: { input: 1 } },
       ]),
     ).toBeUndefined();
+  });
+});
+
+describe("rowPercent", () => {
+  const loaded = host({ list: () => [assistant({ input: 74_000 })] });
+
+  it("produces a percentage for a row whose session is loaded", () => {
+    expect(rowPercent(loaded, MODELS, "ses_row")).toBe(37);
+  });
+
+  it("returns undefined when the row's data is unusable", () => {
+    expect(rowPercent(host(), MODELS, "ses_empty")).toBeUndefined();
+    expect(rowPercent(loaded, [], "ses_row")).toBeUndefined();
+    expect(rowPercent(loaded, MODELS, undefined)).toBeUndefined();
+    expect(
+      rowPercent(
+        host({
+          list: () => {
+            throw new Error("cache invalidated");
+          },
+        }),
+        MODELS,
+        "ses_broken",
+      ),
+    ).toBeUndefined();
+  });
+});
+
+describe("ensureMessages", () => {
+  it("asks once per session, independently, and never throws on a rejection", () => {
+    const asked: string[] = [];
+    const context = host({
+      sync: (sessionID) => {
+        asked.push(sessionID);
+        return Promise.reject(new Error("no such session"));
+      },
+    });
+
+    ensureMessages(context, "ses_a");
+    ensureMessages(context, "ses_a");
+    expect(asked).toEqual(["ses_a"]);
+
+    ensureMessages(context, "ses_b");
+    expect(asked).toEqual(["ses_a", "ses_b"]);
+  });
+
+  it("does not throw when the sync throws synchronously", () => {
+    const context = host({
+      sync: () => {
+        throw new Error("data layer gone");
+      },
+    });
+    expect(() => ensureMessages(context, "ses_throw")).not.toThrow();
+    expect(() => ensureMessages(context, undefined)).not.toThrow();
   });
 });

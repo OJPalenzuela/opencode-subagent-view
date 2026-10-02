@@ -138,6 +138,24 @@ function contextUsage(messages, limit) {
 function usagePercent(models, messages) {
   return contextUsage(messages, findModelInfo(models, lastRequest(messages)?.model)?.limit?.context)?.percent;
 }
+var SYNCED_MESSAGES = /* @__PURE__ */ new Set();
+function ensureMessages(context, sessionID) {
+  if (!sessionID || SYNCED_MESSAGES.has(sessionID)) return;
+  SYNCED_MESSAGES.add(sessionID);
+  try {
+    void context.data.session.message.sync(sessionID).catch(() => {
+    });
+  } catch {
+  }
+}
+function rowPercent(context, models, sessionID) {
+  if (!sessionID) return void 0;
+  try {
+    return usagePercent(models, context.data.session.message.list(sessionID) ?? []);
+  } catch {
+    return void 0;
+  }
+}
 
 // src/alerts.ts
 var ALERTED = /* @__PURE__ */ new Set(["succeeded", "failed", "interrupted"]);
@@ -464,13 +482,6 @@ function safeModels(context) {
     return [];
   }
 }
-function safeMessages(context, sessionID) {
-  try {
-    return context.data.session.message.list(sessionID) ?? [];
-  } catch {
-    return [];
-  }
-}
 function SubagentPanel(props) {
   const {
     context,
@@ -495,13 +506,16 @@ function SubagentPanel(props) {
     const collected = orderRows(visibleRows(collectSubagents(safeList2(context), panel.sessionID, safeStatusLookup(context), safePermissionLookup(context)), prefs.showCompleted));
     return collected.map((row) => ({
       ...row,
-      contextPercent: usagePercent(models, safeMessages(context, row.id))
+      contextPercent: rowPercent(context, models, row.id)
     }));
   });
   createEffect(() => {
     const sessionID = panel.sessionID;
     const ids = [sessionID, ...collectSubagents(safeList2(context), sessionID).map((row) => row.id)];
-    void Promise.allSettled(ids.map((id) => safeSync(context, id)));
+    void Promise.allSettled(ids.map((id) => {
+      ensureMessages(context, id);
+      return safeSync(context, id);
+    }));
   });
   const stopPermission = context.data.on("permission.asked", (event) => {
     const sessionID = event.data?.sessionID;
@@ -641,7 +655,6 @@ function registerPanel(context, tick) {
 var PLUGIN_ID = "subagent-view";
 var ELAPSED_TICK_MS2 = 1e3;
 var REFRESH_COALESCE_MS = 200;
-var SYNCED_MESSAGES = /* @__PURE__ */ new Set();
 var SLOT_DEFAULT = "session.composer.top";
 var SLOT_FOOTER = "prompt.footer.status";
 function safeGet(context, sessionID) {
@@ -670,14 +683,6 @@ function safeList3(context) {
 function safeModels2(context) {
   try {
     return context.data.location.model.list() ?? [];
-  } catch {
-    return [];
-  }
-}
-function safeMessages2(context, sessionID) {
-  if (!sessionID) return [];
-  try {
-    return context.data.session.message.list(sessionID) ?? [];
   } catch {
     return [];
   }
@@ -728,14 +733,7 @@ function SubagentStatus(props) {
     });
   });
   createEffect2(() => {
-    const sessionID = props.sessionID;
-    if (!sessionID || SYNCED_MESSAGES.has(sessionID)) return;
-    SYNCED_MESSAGES.add(sessionID);
-    try {
-      void props.context.data.session.message.sync(sessionID).catch(() => {
-      });
-    } catch {
-    }
+    ensureMessages(props.context, props.sessionID);
   });
   const record = createMemo3(() => {
     props.tick();
@@ -749,7 +747,7 @@ function SubagentStatus(props) {
     ...record(),
     // `undefined` until both lists hold a usable pair, which is what drops
     // the segment instead of printing a misleading `0% ctx`.
-    contextPercent: usagePercent(safeModels2(props.context), safeMessages2(props.context, props.sessionID))
+    contextPercent: rowPercent(props.context, safeModels2(props.context), props.sessionID)
   }, now(), safeStatus(props.context, props.sessionID)));
   const marker = () => MARKERS[summary().state];
   return _$createComponent3(Show3, {

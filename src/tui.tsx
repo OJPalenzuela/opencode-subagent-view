@@ -17,8 +17,8 @@ import type { JSX } from "@opentui/solid";
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { buildSummary } from "./format.js";
 import type { SessionLike, SessionStatus } from "./format.js";
-import { usagePercent } from "./context.js";
-import type { MessageLike, ModelInfoLike } from "./context.js";
+import { ensureMessages, rowPercent } from "./context.js";
+import type { ModelInfoLike } from "./context.js";
 import { createCompletionTracker, finishedMessage } from "./alerts.js";
 import type { CompletionTracker, FinishedSubagent } from "./alerts.js";
 import { COMMAND_IDS } from "./commands.js";
@@ -31,9 +31,6 @@ import { MARKERS, resolveFg, SUBDUED_FALLBACK, SUBDUED_TOKEN } from "./theme.js"
 const PLUGIN_ID = "subagent-view";
 const ELAPSED_TICK_MS = 1_000;
 const REFRESH_COALESCE_MS = 200;
-
-/** Sessions already asked for their messages, for this plugin generation. */
-const SYNCED_MESSAGES = new Set<string>();
 
 const SLOT_DEFAULT = "session.composer.top";
 const SLOT_FOOTER = "prompt.footer.status";
@@ -69,19 +66,6 @@ function safeList(context: Context): SubagentSession[] {
 function safeModels(context: Context): ModelInfoLike[] {
   try {
     return context.data.location.model.list() ?? [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * The session's loaded messages. A cache read: an empty list means "not synced
- * for this session yet", which the caller renders as no segment rather than 0%.
- */
-function safeMessages(context: Context, sessionID: string | undefined): MessageLike[] {
-  if (!sessionID) return [];
-  try {
-    return (context.data.session.message.list(sessionID) ?? []) as MessageLike[];
   } catch {
     return [];
   }
@@ -163,19 +147,10 @@ function SubagentStatus(props: {
   });
 
   // Messages live in their own cache, so `session.sync` above does not fill
-  // them. Syncing on every refresh would be a request per tick, so each session
-  // is asked for exactly once per plugin generation; after that the data layer
-  // keeps it current itself. The host TUI already loads the transcript of the
-  // session you are in, so this is a backstop for a session opened headless.
+  // them; `ensureMessages` asks once per plugin generation and the data layer
+  // keeps them current afterwards. The panel asks the same way for its own rows.
   createEffect(() => {
-    const sessionID = props.sessionID;
-    if (!sessionID || SYNCED_MESSAGES.has(sessionID)) return;
-    SYNCED_MESSAGES.add(sessionID);
-    try {
-      void props.context.data.session.message.sync(sessionID).catch(() => {});
-    } catch {
-      // A session whose messages cannot be loaded simply has no `NN% ctx`.
-    }
+    ensureMessages(props.context, props.sessionID);
   });
 
   // Reactive on purpose. A bare `session.get()` read inside the JSX `when`
@@ -197,10 +172,7 @@ function SubagentStatus(props: {
         ...record(),
         // `undefined` until both lists hold a usable pair, which is what drops
         // the segment instead of printing a misleading `0% ctx`.
-        contextPercent: usagePercent(
-          safeModels(props.context),
-          safeMessages(props.context, props.sessionID),
-        ),
+        contextPercent: rowPercent(props.context, safeModels(props.context), props.sessionID),
       },
       now(),
       safeStatus(props.context, props.sessionID),
