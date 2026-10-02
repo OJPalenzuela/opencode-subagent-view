@@ -302,6 +302,32 @@ describe("rowLine", () => {
     const line = rowLine(row({ label: "plan", needsPermission: true, tokens: 0, cost: 0 }), T0);
     expect(line).toBe("  ○ plan ⚠");
   });
+
+  it("appends the context percentage last, after the cost", () => {
+    const line = rowLine(
+      row({
+        label: "explore",
+        model: "claude-sonnet-4-6",
+        tokens: 12400,
+        cost: 0.04,
+        contextPercent: 37,
+        status: "running",
+        time: { created: T0, updated: T0 },
+      }),
+      T0 + 154_000,
+    );
+    expect(line).toBe("  ● explore · claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok · $0.04 · 37% ctx");
+  });
+
+  it("renders the context percentage without any other metric", () => {
+    expect(rowLine(row({ label: "plan", contextPercent: 37 }), T0)).toBe("  ○ plan · 37% ctx");
+  });
+
+  it("omits a missing or non-finite context percentage", () => {
+    for (const contextPercent of [undefined, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(rowLine(row({ label: "plan", contextPercent }), T0)).toBe("  ○ plan");
+    }
+  });
 });
 
 describe("headerLine", () => {

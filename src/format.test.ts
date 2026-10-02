@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSummary, formatCost, formatDuration, formatTokens } from "./format.js";
+import { buildSummary, formatCost, formatDuration, formatPercent, formatTokens } from "./format.js";
 import type { SessionLike, SessionModel } from "./format.js";
 
 const T0 = 1_700_000_000_000;
@@ -102,6 +102,26 @@ describe("formatCost", () => {
     expect(formatCost(-0.001)).toBe("$0.00");
     expect(formatCost(Number.NaN)).toBe("$0.00");
     expect(formatCost(Number.POSITIVE_INFINITY)).toBe("$0.00");
+  });
+});
+
+describe("formatPercent", () => {
+  it("renders whole percentages without decimals", () => {
+    expect(formatPercent(0)).toBe("0");
+    expect(formatPercent(37)).toBe("37");
+    expect(formatPercent(128)).toBe("128");
+  });
+
+  it("rounds to the nearest whole percent", () => {
+    expect(formatPercent(36.4)).toBe("36");
+    expect(formatPercent(36.5)).toBe("37");
+    expect(formatPercent(99.6)).toBe("100");
+  });
+
+  it("clamps non-finite input to 0", () => {
+    expect(formatPercent(Number.NaN)).toBe("0");
+    expect(formatPercent(Number.POSITIVE_INFINITY)).toBe("0");
+    expect(formatPercent(undefined as unknown as number)).toBe("0");
   });
 });
 
@@ -232,6 +252,36 @@ describe("buildSummary cost segment", () => {
     for (const cost of [undefined, 0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
       const summary = buildSummary(session({ cost }), T0);
       expect(summary.parts.some((part) => part.startsWith("$"))).toBe(false);
+    }
+  });
+});
+
+describe("buildSummary context segment", () => {
+  it("appends the percentage last, after the cost", () => {
+    const summary = buildSummary(session({ cost: 0.04, contextPercent: 37 }), T0 + 154_000);
+    expect(summary.parts).toEqual([
+      "anthropic/claude-sonnet-4-6",
+      "⏱ 02:34",
+      "12.4k tok",
+      "$0.04",
+      "37% ctx",
+    ]);
+    expect(summary.text).toBe("anthropic/claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok · $0.04 · 37% ctx");
+  });
+
+  it("renders it without any other metric", () => {
+    expect(buildSummary({ contextPercent: 37 }, T0).parts).toEqual(["37% ctx"]);
+  });
+
+  it("keeps a zero and an over-limit percentage verbatim", () => {
+    expect(buildSummary(session({ contextPercent: 0 }), T0).parts).toContain("0% ctx");
+    expect(buildSummary(session({ contextPercent: 128 }), T0).parts).toContain("128% ctx");
+  });
+
+  it("omits a missing or non-finite percentage", () => {
+    for (const contextPercent of [undefined, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const summary = buildSummary(session({ contextPercent }), T0);
+      expect(summary.parts.some((part) => part.endsWith("ctx"))).toBe(false);
     }
   });
 });

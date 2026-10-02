@@ -57,6 +57,9 @@ function formatTokens(n) {
   const unit = TOKEN_UNITS[index];
   return `${(total / unit.size).toFixed(1)}${unit.suffix}`;
 }
+function formatPercent(percent) {
+  return String(Math.round(finite(percent) ?? 0));
+}
 function deriveState(session, status) {
   const outcome = session.outcome;
   if (outcome !== void 0) return OUTCOME_STATE[outcome] ?? STATE.UNKNOWN;
@@ -87,6 +90,8 @@ function buildSummary(session, now, status) {
   if (tokenTotal2 > 0) parts.push(`${formatTokens(tokenTotal2)} tok`);
   const cost = finite(session.cost);
   if (cost !== void 0 && cost > 0) parts.push(formatCost(cost));
+  const percent = finite(session.contextPercent);
+  if (percent !== void 0) parts.push(`${formatPercent(percent)}% ctx`);
   const label = session.agent?.trim() || session.title?.trim() || DEFAULT_LABEL;
   return {
     state: deriveState(session, status),
@@ -94,6 +99,44 @@ function buildSummary(session, now, status) {
     parts,
     text: parts.join(SEPARATOR)
   };
+}
+
+// src/context.ts
+function idOf(model, id) {
+  return model?.id === id || model?.modelID === id;
+}
+function findModelInfo(models, ref) {
+  if (!Array.isArray(models) || models.length === 0) return void 0;
+  const id = ref?.id;
+  if (typeof id !== "string" || id === "") return void 0;
+  const provider = ref?.providerID;
+  if (typeof provider === "string" && provider !== "") {
+    const exact = models.find((model) => model?.providerID === provider && idOf(model, id));
+    if (exact) return exact;
+  }
+  return models.find((model) => idOf(model, id));
+}
+function lastRequest(messages) {
+  if (!Array.isArray(messages)) return void 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.type !== "assistant") continue;
+    if (typeof message.tokens !== "object" || message.tokens === null) continue;
+    return message;
+  }
+  return void 0;
+}
+function contextUsage(messages, limit) {
+  const max = finite(limit);
+  if (max === void 0 || max <= 0) return void 0;
+  const request = lastRequest(messages);
+  const tokens = request?.tokens;
+  if (!tokens) return void 0;
+  const used = (finite(tokens.input) ?? 0) + (finite(tokens.output) ?? 0) + (finite(tokens.reasoning) ?? 0) + (finite(tokens.cache?.read) ?? 0) + (finite(tokens.cache?.write) ?? 0);
+  return { used, limit: max, percent: Math.round(used / max * 100) };
+}
+function usagePercent(models, messages) {
+  return contextUsage(messages, findModelInfo(models, lastRequest(messages)?.model)?.limit?.context)?.percent;
 }
 
 // src/alerts.ts
@@ -311,6 +354,8 @@ function rowLine(row, now) {
   if (elapsed !== void 0) parts.push(`\u23F1 ${formatDuration(elapsed)}`);
   if (row.tokens !== void 0 && row.tokens > 0) parts.push(`${formatTokens(row.tokens)} tok`);
   if (row.cost !== void 0 && row.cost > 0) parts.push(formatCost(row.cost));
+  const percent = finite(row.contextPercent);
+  if (percent !== void 0) parts.push(`${formatPercent(percent)}% ctx`);
   const current = row.isCurrent ? CURRENT_GLYPH : " ";
   const glyph = MARKERS[stateOf(row, now)].glyph;
   const indent = INDENT.repeat(Math.max(0, row.depth - 1));
@@ -412,6 +457,20 @@ function safeSync(context, sessionID) {
     return Promise.resolve();
   }
 }
+function safeModels(context) {
+  try {
+    return context.data.location.model.list() ?? [];
+  } catch {
+    return [];
+  }
+}
+function safeMessages(context, sessionID) {
+  try {
+    return context.data.session.message.list(sessionID) ?? [];
+  } catch {
+    return [];
+  }
+}
 function SubagentPanel(props) {
   const {
     context,
@@ -432,7 +491,12 @@ function SubagentPanel(props) {
   const rows = createMemo2(() => {
     props.tick();
     now();
-    return orderRows(visibleRows(collectSubagents(safeList2(context), panel.sessionID, safeStatusLookup(context), safePermissionLookup(context)), prefs.showCompleted));
+    const models = safeModels(context);
+    const collected = orderRows(visibleRows(collectSubagents(safeList2(context), panel.sessionID, safeStatusLookup(context), safePermissionLookup(context)), prefs.showCompleted));
+    return collected.map((row) => ({
+      ...row,
+      contextPercent: usagePercent(models, safeMessages(context, row.id))
+    }));
   });
   createEffect(() => {
     const sessionID = panel.sessionID;
@@ -577,6 +641,7 @@ function registerPanel(context, tick) {
 var PLUGIN_ID = "subagent-view";
 var ELAPSED_TICK_MS2 = 1e3;
 var REFRESH_COALESCE_MS = 200;
+var SYNCED_MESSAGES = /* @__PURE__ */ new Set();
 var SLOT_DEFAULT = "session.composer.top";
 var SLOT_FOOTER = "prompt.footer.status";
 function safeGet(context, sessionID) {
@@ -598,6 +663,21 @@ function safeStatus(context, sessionID) {
 function safeList3(context) {
   try {
     return context.data.session.list() ?? [];
+  } catch {
+    return [];
+  }
+}
+function safeModels2(context) {
+  try {
+    return context.data.location.model.list() ?? [];
+  } catch {
+    return [];
+  }
+}
+function safeMessages2(context, sessionID) {
+  if (!sessionID) return [];
+  try {
+    return context.data.session.message.list(sessionID) ?? [];
   } catch {
     return [];
   }
@@ -647,6 +727,16 @@ function SubagentStatus(props) {
     props.context.data.session.sync(sessionID).catch(() => {
     });
   });
+  createEffect2(() => {
+    const sessionID = props.sessionID;
+    if (!sessionID || SYNCED_MESSAGES.has(sessionID)) return;
+    SYNCED_MESSAGES.add(sessionID);
+    try {
+      void props.context.data.session.message.sync(sessionID).catch(() => {
+      });
+    } catch {
+    }
+  });
   const record = createMemo3(() => {
     props.tick();
     return safeGet(props.context, props.sessionID);
@@ -655,7 +745,12 @@ function SubagentStatus(props) {
     now();
     return Boolean(record()?.parentID);
   });
-  const summary = createMemo3(() => buildSummary(record() ?? {}, now(), safeStatus(props.context, props.sessionID)));
+  const summary = createMemo3(() => buildSummary({
+    ...record(),
+    // `undefined` until both lists hold a usable pair, which is what drops
+    // the segment instead of printing a misleading `0% ctx`.
+    contextPercent: usagePercent(safeModels2(props.context), safeMessages2(props.context, props.sessionID))
+  }, now(), safeStatus(props.context, props.sessionID)));
   const marker = () => MARKERS[summary().state];
   return _$createComponent3(Show3, {
     get when() {
@@ -730,6 +825,11 @@ var tui_default = Plugin.define({
       announceFinished(context, tracker, sessionID, stamp);
     };
     const stopEvents = context.data.listen(requestRefresh);
+    try {
+      void context.data.location.model.sync().catch(() => {
+      });
+    } catch {
+    }
     const release = resolveSlot(context.options.slot) === SLOT_FOOTER ? context.ui.slot({
       append: SLOT_FOOTER,
       render: (input) => renderStatus(context, input.sessionID, tick)

@@ -11,6 +11,8 @@
 import type { Context, PanelInput } from "@opencode/plugin/tui/context";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import { COMMAND_IDS } from "./commands.js";
+import { usagePercent } from "./context.js";
+import type { MessageLike, ModelInfoLike } from "./context.js";
 import { collectSubagents, counts, headerLine, orderRows, rowLine, stateOf, visibleRows } from "./subagents.js";
 import type {
   PermissionLookup,
@@ -74,6 +76,24 @@ function safeSync(context: Context, sessionID: string): Promise<void> {
   }
 }
 
+/** The provider's model collection; carries the context limit, no `get` on it. */
+function safeModels(context: Context): ModelInfoLike[] {
+  try {
+    return context.data.location.model.list() ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** That session's loaded messages; empty when the host has not loaded them. */
+function safeMessages(context: Context, sessionID: string): MessageLike[] {
+  try {
+    return (context.data.session.message.list(sessionID) ?? []) as MessageLike[];
+  } catch {
+    return [];
+  }
+}
+
 function SubagentPanel(props: {
   readonly context: Context;
   readonly panel: PanelInput;
@@ -95,7 +115,11 @@ function SubagentPanel(props: {
   const rows = createMemo(() => {
     props.tick();
     now();
-    return orderRows(
+    // One model list for every row. Messages are read from the cache the host
+    // already filled for the sessions it has loaded, never requested here: a
+    // row whose data is missing shows no percentage rather than a wrong one.
+    const models = safeModels(context);
+    const collected = orderRows(
       visibleRows(
         collectSubagents(
           safeList(context),
@@ -106,6 +130,10 @@ function SubagentPanel(props: {
         prefs.showCompleted,
       ),
     );
+    return collected.map((row) => ({
+      ...row,
+      contextPercent: usagePercent(models, safeMessages(context, row.id)),
+    }));
   });
 
   // The rows are the panel, so their sessions must have their pending

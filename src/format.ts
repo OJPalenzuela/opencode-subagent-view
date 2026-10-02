@@ -64,6 +64,12 @@ export interface SessionLike {
   readonly time?: SessionTime;
   /** USD already spent. Zero and non-finite values render as no segment. */
   readonly cost?: number;
+  /**
+   * Context-window occupancy of the session's most recent request, already
+   * computed by the caller (`src/context.ts` owns the math). Missing means
+   * "not computable yet", so no segment is rendered rather than a `0`.
+   */
+  readonly contextPercent?: number;
 }
 
 export interface Summary {
@@ -130,6 +136,17 @@ export function formatTokens(n: number): string {
   if (index > 0 && Number((total / TOKEN_UNITS[index].size).toFixed(1)) >= 1000) index -= 1;
   const unit = TOKEN_UNITS[index];
   return `${(total / unit.size).toFixed(1)}${unit.suffix}`;
+}
+
+/**
+ * Whole percent, no decimals: `0`, `37`, `128`. Halfway rounds up, and
+ * non-numbers read as `0` like the other formatters do.
+ *
+ * Nothing is clamped: a session that genuinely overflowed its context window
+ * should say so instead of showing a reassuring `100`.
+ */
+export function formatPercent(percent: number): string {
+  return String(Math.round(finite(percent) ?? 0));
 }
 
 /** Narrowest shape that decides a state: satisfied by records and rows alike. */
@@ -203,6 +220,10 @@ export function buildSummary(
   // Same gate as tokens: a spent-less session gets no `$0.00` filler.
   const cost = finite(session.cost);
   if (cost !== undefined && cost > 0) parts.push(formatCost(cost));
+
+  // Last segment: occupancy is the freshest number, so it reads at the end.
+  const percent = finite(session.contextPercent);
+  if (percent !== undefined) parts.push(`${formatPercent(percent)}% ctx`);
 
   const label = session.agent?.trim() || session.title?.trim() || DEFAULT_LABEL;
 

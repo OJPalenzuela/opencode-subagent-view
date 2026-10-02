@@ -4,13 +4,30 @@ When you are inside a subagent's session in the OpenCode v2 TUI, the interface
 stops telling you what that subagent is doing — no model, no token usage, no
 clock. This plugin adds one live line above the composer for exactly that case:
 state dot, agent name, model (`provider/id`, with the variant when the session
-picked one), elapsed time, tokens and cost, e.g.
+picked one), elapsed time, tokens, cost and context-window usage, e.g.
 
 ```
-● explore · anthropic/claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok · $0.04
+● explore · anthropic/claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok · $0.04 · 37% ctx
 ```
 
 It renders nothing in root sessions, so it stays out of the way everywhere else.
+
+## Context window
+
+`37% ctx` is how full the model's context window was on the most recent request:
+the last assistant message's own counters (input + cache read + cache write +
+output + reasoning) against the model's declared context limit.
+
+- It is **not** the session's cumulative token total, which only ever grows and
+  would report nonsense on a long session. OpenCode's own context formula is not
+  exposed to plugins, so this is the closest honest measure available — treat it
+  as an approximation, not as a byte-exact reading of the window.
+- The percentage is never clamped, so an over-long session reads `128% ctx`
+  instead of a reassuring `100`.
+- It appears only when the data exists: the session's messages must be loaded and
+  the model must be one the plugin's provider knows. Until then the segment is
+  simply absent rather than `0% ctx`.
+- It shows on the status line and on each panel row that has the data.
 
 ## Subagents panel
 
@@ -20,9 +37,9 @@ children and grandchildren, one row each:
 
 ```
 Subagents  2 run · 1 done · 0 err
-  ● explore · claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok
+  ● explore · claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok · 37% ctx
     ◌ review · gpt-5 · ⏱ 00:12 · 3.1k tok
-› ✓ build · claude-sonnet-4-6 · ⏱ 01:04 · 8.0k tok · $0.04
+› ✓ build · claude-sonnet-4-6 · ⏱ 01:04 · 8.0k tok · $0.04 · 12% ctx
   ● docs · claude-sonnet-4-6 · ⏱ 00:03 · 1.2k tok ⚠
 j/k move · enter open · c completed · f fullscreen · esc close
 ```
@@ -31,6 +48,8 @@ j/k move · enter open · c completed · f fullscreen · esc close
   same markers as the status line. Idle and unknown rows stay in the panel; only
   done, failed and interrupted are hidden by `c`.
 - Rows are indented by depth, so nested subagents sit under their parent.
+- `NN% ctx` is the [context window](#context-window) of that session's most
+  recent request, last segment, and only on rows whose data is loaded.
 - ⚠ marks a session with a permission request waiting for an answer.
 - `›` marks the session you are currently in.
 - The first rows are the ones that need you: pending permissions, then running,
@@ -146,9 +165,11 @@ Restart the TUI after editing the config.
 | Record changes | `data.listen` with ~200 ms coalescing, so event bursts render once |
 | Session switch | `data.session.sync(sessionID)` on change |
 | State markers | `●` running, `◌` idle, `✓` done, `✕` failed, `⊘` interrupted, `○` unknown |
-| Partial data | Missing model/cost/tokens/time are omitted; nothing throws |
+| Partial data | Missing model/cost/tokens/time/context are omitted; nothing throws |
 | Panel rows | Root resolved by walking `parentID`; grandchildren included |
 | Panel permissions | Cached with `session.permission.sync` on open, and on every `permission.asked` |
+| Context window | Last assistant message's counters ÷ `limit.context` of the model it used; `location.model.list()` scanned, since that collection has no `get` |
+| Context data | `session.message.list()` cache read; the current session's messages are synced once per plugin generation, never per refresh |
 | Completion alerts | Diffed per refresh; sound and notification only while blurred |
 | Alert priming | The first snapshot is a baseline, so a reload announces nothing |
 | Footer counters | `prompt.footer.status`, session id from the slot input; hidden with no session or no subagents |
@@ -162,15 +183,16 @@ Restart the TUI after editing the config.
 
 ```bash
 pnpm install && pnpm build   # emit dist/tui.js
-pnpm test                    # unit tests for formatting, selectors and alerts
+pnpm test                    # unit tests for formatting, selectors, context math and alerts
 pnpm typecheck               # tsc --noEmit
 ```
 
 Formatting logic lives in `src/format.ts`, the panel selectors in
-`src/subagents.ts`, and the completion tracker and alert text in
-`src/alerts.ts`. All three are deliberately free of TUI imports, and every
-look-up is injected as a parameter, so they can be unit tested in isolation.
-`src/panel.tsx`, `src/footer.tsx` and `src/tui.tsx` only wire them to the host.
+`src/subagents.ts`, the context-window math in `src/context.ts`, and the
+completion tracker and alert text in `src/alerts.ts`. All four are deliberately
+free of TUI imports, and every look-up is injected as a parameter, so they can be
+unit tested in isolation. `src/panel.tsx`, `src/footer.tsx` and `src/tui.tsx`
+only wire them to the host.
 
 ## Release
 

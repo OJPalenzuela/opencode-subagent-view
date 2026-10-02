@@ -6,7 +6,17 @@
  * be mid-invalidation while the panel re-renders.
  */
 
-import { DEFAULT_LABEL, STATE, deriveState, elapsedMs, finite, formatCost, formatDuration, formatTokens } from "./format.js";
+import {
+  DEFAULT_LABEL,
+  STATE,
+  deriveState,
+  elapsedMs,
+  finite,
+  formatCost,
+  formatDuration,
+  formatPercent,
+  formatTokens,
+} from "./format.js";
 import type { Outcome, SessionLike, SessionStatus, SessionTime, State } from "./format.js";
 import { CURRENT_GLYPH, MARKERS, PERMISSION_GLYPH } from "./theme.js";
 
@@ -23,6 +33,12 @@ export interface SubagentRow {
   /** Input + output, the same total the status line shows. */
   readonly tokens?: number;
   readonly cost?: number;
+  /**
+   * Context-window occupancy of this session's most recent request. Computed by
+   * the panel from that session's message list and rendered last; missing means
+   * "not computable yet", so nothing is rendered for it.
+   */
+  readonly contextPercent?: number;
   readonly time?: SessionTime;
   readonly outcome?: Outcome;
   readonly status?: SessionStatus;
@@ -201,7 +217,7 @@ export function counts(rows: readonly SubagentRow[]): SubagentCounts {
 
 const INDENT = "  ";
 
-/** `› ● explore · model · ⏱ 02:34 · 12.4k tok · $0.04 ⚠` */
+/** `› ● explore · model · ⏱ 02:34 · 12.4k tok · $0.04 · 37% ctx ⚠` */
 export function rowLine(row: SubagentRow, now: number): string {
   const parts: string[] = [];
   if (row.model) parts.push(row.model);
@@ -211,6 +227,11 @@ export function rowLine(row: SubagentRow, now: number): string {
 
   if (row.tokens !== undefined && row.tokens > 0) parts.push(`${formatTokens(row.tokens)} tok`);
   if (row.cost !== undefined && row.cost > 0) parts.push(formatCost(row.cost));
+
+  // Last segment, same position as the status line's: occupancy is the
+  // freshest number on the row.
+  const percent = finite(row.contextPercent);
+  if (percent !== undefined) parts.push(`${formatPercent(percent)}% ctx`);
 
   const current = row.isCurrent ? CURRENT_GLYPH : " ";
   const glyph = MARKERS[stateOf(row, now)].glyph;
