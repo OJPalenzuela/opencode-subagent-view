@@ -1,0 +1,51 @@
+{
+  "name": "opencode-subagent-view",
+  "version": "0.1.0",
+  "description": "OpenCode v2 TUI plugin that shows live stats for the subagent session you are inside",
+  "type": "module",
+  "exports": {
+    "./tui": "./dist/tui.js"
+  },
+  "files": [
+    "dist",
+    "tui.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "tui",
+    "subagent"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": ">=2.0.0 <3",
+    "@opentui/solid": ">=0.5.8 <0.6",
+    "solid-js": ">=1.9.0 <2"
+  },
+  "peerDependenciesMeta": {
+    "@opencode/plugin": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@opencode/plugin": "^2.0.8",
+    "@opentui/core": "^0.5.10",
+    "@opentui/solid": "^0.5.10",
+    "@types/node": "^22.19.19",
+    "esbuild-plugin-solid": "^0.6.0",
+    "solid-js": "1.9.12",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.7"
+  }
+}
