@@ -18,7 +18,7 @@ import type { JSX } from "@opentui/solid";
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { buildSummary } from "./format.js";
 import type { SessionLike, SessionStatus } from "./format.js";
-import { ensureMessages, rowPercent } from "./context.js";
+import { ensureMessages, resetSyncGuards, rowPercent } from "./context.js";
 import type { ModelInfoLike } from "./context.js";
 import { createCompletionTracker, finishedMessage } from "./alerts.js";
 import type { CompletionTracker, FinishedSubagent } from "./alerts.js";
@@ -288,6 +288,10 @@ export default Plugin.define({
       releaseFooter?.();
       releaseSidebar?.();
       releaseCommand?.();
+      // The sync guards are module state that outlives this setup: clearing them
+      // here means a re-`setup()` in the same process syncs again instead of
+      // inheriting stale marks and never warming a cache.
+      resetSyncGuards();
     };
   },
 });

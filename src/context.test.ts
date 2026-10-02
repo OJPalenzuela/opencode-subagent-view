@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { contextUsage, ensureMessages, ensureSessions, findModelInfo, rowPercent, usagePercent } from "./context.js";
+import { beforeEach, describe, expect, it } from "vitest";
+import { contextUsage, ensureMessages, ensureSessions, findModelInfo, resetSyncGuards, rowPercent, usagePercent } from "./context.js";
 import type { MessageCache, MessageLike, MessageTokens, ModelInfoLike, PermissionSync } from "./context.js";
 
 function info(id: string, providerID: string, limit: number, modelID = id): ModelInfoLike {
@@ -51,6 +51,13 @@ const MODELS: ModelInfoLike[] = [
   // `id` carries the provider prefix while `modelID` stays bare.
   info("openai/gpt-5-mini", "openai", 128_000, "gpt-5-mini"),
 ];
+
+// The sync guards are module state, exactly as they are in the plugin, so every
+// test starts from a clean generation instead of leaning on unique ids to stay
+// independent of the order vitest happens to run them in.
+beforeEach(() => {
+  resetSyncGuards();
+});
 
 describe("findModelInfo", () => {
   it("resolves by provider and id", () => {
@@ -205,21 +212,48 @@ describe("rowPercent", () => {
 });
 
 describe("ensureMessages", () => {
-  it("asks once per session, independently, and never throws on a rejection", () => {
+  it("asks once per session, independently, and retries a rejected ask later", async () => {
     const asked: string[] = [];
     const context = host({
       sync: (sessionID) => {
         asked.push(sessionID);
-        return Promise.reject(new Error("no such session"));
+        return sessionID === "rej" ? Promise.reject(new Error("no such session")) : Promise.resolve();
       },
     });
 
-    ensureMessages(context, "ses_a");
-    ensureMessages(context, "ses_a");
-    expect(asked).toEqual(["ses_a"]);
+    // Same tick: the optimistic mark is still there, so the second ask is free.
+    ensureMessages(context, "rej");
+    ensureMessages(context, "rej");
+    expect(asked).toEqual(["rej"]);
 
-    ensureMessages(context, "ses_b");
-    expect(asked).toEqual(["ses_a", "ses_b"]);
+    // The rejection settled and dropped the mark, so the next ask retries it.
+    await Promise.resolve();
+    ensureMessages(context, "rej");
+    expect(asked).toEqual(["rej", "rej"]);
+
+    // A sync that resolved keeps its mark and is never repeated.
+    ensureMessages(context, "ok");
+    ensureMessages(context, "ok");
+    expect(asked).toEqual(["rej", "rej", "ok"]);
+  });
+
+  it("retries after a synchronous throw, which must leave the id unmarked", () => {
+    const asked: string[] = [];
+    let broken = true;
+    const context = host({
+      sync: (sessionID) => {
+        asked.push(sessionID);
+        if (broken) {
+          broken = false;
+          throw new Error("data layer gone");
+        }
+        return Promise.resolve();
+      },
+    });
+
+    ensureMessages(context, "ses_throw_sync");
+    ensureMessages(context, "ses_throw_sync");
+    expect(asked).toEqual(["ses_throw_sync", "ses_throw_sync"]);
   });
 
   it("does not throw when the sync throws synchronously", () => {
@@ -271,5 +305,76 @@ describe("ensureSessions", () => {
     });
     expect(() => ensureSessions(throwing, ["s4_throw"])).not.toThrow();
     expect(() => ensureSessions(throwing, [])).not.toThrow();
+  });
+
+  it("retries a rejected sync later, and never repeats one that resolved", async () => {
+    const asked: string[] = [];
+    const context = permissionHost((sessionID) => {
+      asked.push(sessionID);
+      return sessionID === "p_rej" ? Promise.reject(new Error("no such session")) : Promise.resolve();
+    });
+
+    // Same tick: the optimistic mark is still there, so the second ask is free.
+    ensureSessions(context, ["p_rej"]);
+    ensureSessions(context, ["p_rej"]);
+    expect(asked).toEqual(["p_rej"]);
+
+    // The rejection settled and dropped the mark, so the next call retries it.
+    await Promise.resolve();
+    ensureSessions(context, ["p_rej"]);
+    expect(asked).toEqual(["p_rej", "p_rej"]);
+
+    ensureSessions(context, ["p_ok"]);
+    ensureSessions(context, ["p_ok"]);
+    expect(asked).toEqual(["p_rej", "p_rej", "p_ok"]);
+  });
+
+  it("retries after a synchronous throw, which must leave the id unmarked", () => {
+    const asked: string[] = [];
+    let broken = true;
+    const context = permissionHost((sessionID) => {
+      asked.push(sessionID);
+      if (broken) {
+        broken = false;
+        throw new Error("data layer gone");
+      }
+      return Promise.resolve();
+    });
+
+    ensureSessions(context, ["p_throw"]);
+    ensureSessions(context, ["p_throw"]);
+    expect(asked).toEqual(["p_throw", "p_throw"]);
+  });
+});
+
+describe("resetSyncGuards", () => {
+  it("lets an already-synced session sync again, in both guards", () => {
+    const asked: string[] = [];
+    const messages = host({ sync: recorder(asked) });
+    const permissions = permissionHost(recorder(asked));
+
+    ensureMessages(messages, "reset_a");
+    ensureSessions(permissions, ["reset_b"]);
+    expect(asked).toEqual(["reset_a", "reset_b"]);
+
+    // Still guarded before the reset.
+    ensureMessages(messages, "reset_a");
+    ensureSessions(permissions, ["reset_b"]);
+    expect(asked).toEqual(["reset_a", "reset_b"]);
+
+    resetSyncGuards();
+
+    // A new plugin generation must not inherit the previous one's marks.
+    ensureMessages(messages, "reset_a");
+    ensureSessions(permissions, ["reset_b"]);
+    expect(asked).toEqual(["reset_a", "reset_b", "reset_a", "reset_b"]);
+  });
+
+  it("is safe to call with nothing synced", () => {
+    const asked: string[] = [];
+    const permissions = permissionHost(recorder(asked));
+    resetSyncGuards();
+    ensureSessions(permissions, ["reset_c"]);
+    expect(asked).toEqual(["reset_c"]);
   });
 });

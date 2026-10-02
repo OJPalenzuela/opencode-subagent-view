@@ -147,8 +147,10 @@ function ensureMessages(context, sessionID) {
   SYNCED_MESSAGES.add(sessionID);
   try {
     void context.data.session.message.sync(sessionID).catch(() => {
+      SYNCED_MESSAGES.delete(sessionID);
     });
   } catch {
+    SYNCED_MESSAGES.delete(sessionID);
   }
 }
 var SYNCED_PERMISSIONS = /* @__PURE__ */ new Set();
@@ -158,10 +160,16 @@ function ensureSessions(context, sessionIDs) {
     SYNCED_PERMISSIONS.add(sessionID);
     try {
       void context.data.session.permission.sync(sessionID).catch(() => {
+        SYNCED_PERMISSIONS.delete(sessionID);
       });
     } catch {
+      SYNCED_PERMISSIONS.delete(sessionID);
     }
   }
+}
+function resetSyncGuards() {
+  SYNCED_MESSAGES.clear();
+  SYNCED_PERMISSIONS.clear();
 }
 function rowPercent(context, models, sessionID) {
   if (!sessionID) return void 0;
@@ -799,20 +807,37 @@ function safePermissionLookup2(context) {
     }
   };
 }
+function usableSessionID(value) {
+  return typeof value === "string" && value !== "" ? value : void 0;
+}
+function resolveSidebarSession(slotSessionID, readRoute) {
+  const fromSlot = usableSessionID(slotSessionID);
+  if (fromSlot !== void 0) return fromSlot;
+  try {
+    const route = readRoute();
+    return route?.type === "session" ? usableSessionID(route.sessionID) : void 0;
+  } catch {
+    return void 0;
+  }
+}
 function SubagentGlance(props) {
   const [now, setNow] = createSignal2(Date.now());
+  const sessionID = () => resolveSidebarSession(props.slotSessionID, () => props.context.ui.router.current());
   createEffect2(() => {
     const timer = setInterval(() => setNow(Date.now()), ELAPSED_TICK_MS2);
     onCleanup2(() => clearInterval(timer));
   });
   createEffect2(() => {
     props.tick();
-    const sessionID = props.sessionID;
-    ensureSessions(props.context, [sessionID, ...collectSubagents(safeList3(props.context), sessionID).map((row) => row.id)]);
+    const id = sessionID();
+    if (id === void 0) return;
+    ensureSessions(props.context, [id, ...collectSubagents(safeList3(props.context), id).map((row) => row.id)]);
   });
   const rows = createMemo3(() => {
     props.tick();
-    return topRows(collectSubagents(safeList3(props.context), props.sessionID, safeStatusLookup2(props.context), safePermissionLookup2(props.context)));
+    const id = sessionID();
+    if (id === void 0) return [];
+    return topRows(collectSubagents(safeList3(props.context), id, safeStatusLookup2(props.context), safePermissionLookup2(props.context)));
   });
   const line = (row) => sidebarLine(row, now());
   const fg = (row) => {
@@ -846,7 +871,7 @@ function registerSidebar(context, tick) {
     append: "sidebar.content",
     render: (input) => _$createComponent3(SubagentGlance, {
       context,
-      get sessionID() {
+      get slotSessionID() {
         return input.sessionID;
       },
       tick
@@ -1054,6 +1079,7 @@ var tui_default = Plugin.define({
       releaseFooter?.();
       releaseSidebar?.();
       releaseCommand?.();
+      resetSyncGuards();
     };
   }
 });

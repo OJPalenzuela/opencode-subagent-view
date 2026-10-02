@@ -198,7 +198,7 @@ Restart the TUI after editing the config.
 | Panel rows | Root resolved by walking `parentID`; grandchildren included |
 | Panel permissions | Cached with `session.permission.sync` on open, and on every `permission.asked` |
 | Context window | Last assistant message's counters ÷ `limit.context` of the model it used; `location.model.list()` scanned, since that collection has no `get` |
-| Context data | `session.message.list()` cache read; the current session's messages are synced once per plugin generation, never per refresh |
+| Context data | `session.message.list()` cache read; the current session's messages are synced once per plugin generation, retried only if that sync fails |
 | Completion alerts | Diffed per refresh; sound and notification only while blurred |
 | Alert priming | The first snapshot is a baseline, so a reload announces nothing |
 | Footer counters | `prompt.footer.status`, session id from the slot input; hidden with no session or no subagents |

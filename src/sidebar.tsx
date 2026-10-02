@@ -55,12 +55,61 @@ function safePermissionLookup(context: Context): PermissionLookup {
   };
 }
 
+/** Structural subset of the host route: only what a session id needs. */
+interface RouteLike {
+  readonly type?: string;
+  readonly sessionID?: string;
+}
+
+function usableSessionID(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/**
+ * The session the widget describes: the slot's own id when it has one, else the
+ * router's.
+ *
+ * Observed in the live TUI: `sidebar.content` declares a `sessionID` but does not
+ * reliably populate it. Do not "simplify" the fallback away — an empty id is not
+ * a harmless default. `collectSubagents` resolves no root from one and returns
+ * zero rows on *every* call, which is indistinguishable from "this session has no
+ * subagents", so the widget drew nothing at all while `/subagents` listed the
+ * same subagents correctly.
+ *
+ * `undefined` means no session anywhere, and then there is no tree to report:
+ * render nothing, which is correct rather than a silent failure.
+ */
+export function resolveSidebarSession(
+  slotSessionID: unknown,
+  readRoute: () => unknown,
+): string | undefined {
+  const fromSlot = usableSessionID(slotSessionID);
+  if (fromSlot !== undefined) return fromSlot;
+  try {
+    const route = readRoute() as RouteLike | undefined;
+    return route?.type === "session" ? usableSessionID(route.sessionID) : undefined;
+  } catch {
+    // A dead router is as good as no session: draw nothing.
+    return undefined;
+  }
+}
+
 function SubagentGlance(props: {
   readonly context: Context;
-  readonly sessionID: string;
+  /** The slot's declared id: guaranteed by the type, not by the runtime. */
+  readonly slotSessionID: string;
   readonly tick: () => number;
 }) {
   const [now, setNow] = createSignal(Date.now());
+
+  // Deliberately a plain call and not a `createMemo`: the SDK documents
+  // `panel.current()` and `tabs.list()` as "reactive when read in a Solid
+  // computation" and says nothing of the sort for `router.current()`, so a cached
+  // computation would keep whatever it computed at mount and go stale on the
+  // first session switch — the same silent-nothing bug one level up. Both readers
+  // below already re-run on every tick, which is enough.
+  const sessionID = () =>
+    resolveSidebarSession(props.slotSessionID, () => props.context.ui.router.current());
 
   createEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), ELAPSED_TICK_MS);
@@ -80,10 +129,12 @@ function SubagentGlance(props: {
   // generation, so a repeat costs one `Set` lookup per id.
   createEffect(() => {
     props.tick();
-    const sessionID = props.sessionID;
+    const id = sessionID();
+    // No session resolved: there is no cache to warm.
+    if (id === undefined) return;
     ensureSessions(props.context, [
-      sessionID,
-      ...collectSubagents(safeList(props.context), sessionID).map((row) => row.id),
+      id,
+      ...collectSubagents(safeList(props.context), id).map((row) => row.id),
     ]);
   });
 
@@ -91,10 +142,14 @@ function SubagentGlance(props: {
   // event, which is what turns a newly spawned subagent into a line.
   const rows = createMemo(() => {
     props.tick();
+    const id = sessionID();
+    // Stopping here keeps "no session" distinct from "no subagents", which is
+    // the exact distinction this widget failed to make when it shipped.
+    if (id === undefined) return [];
     return topRows(
       collectSubagents(
         safeList(props.context),
-        props.sessionID,
+        id,
         safeStatusLookup(props.context),
         safePermissionLookup(props.context),
       ),
@@ -125,6 +180,8 @@ function SubagentGlance(props: {
 export function registerSidebar(context: Context, tick: () => number): () => void {
   return context.ui.slot({
     append: "sidebar.content",
-    render: (input) => <SubagentGlance context={context} sessionID={input.sessionID} tick={tick} />,
+    render: (input) => (
+      <SubagentGlance context={context} slotSessionID={input.sessionID} tick={tick} />
+    ),
   });
 }

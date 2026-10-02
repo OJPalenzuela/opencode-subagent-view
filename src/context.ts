@@ -171,17 +171,32 @@ const SYNCED_MESSAGES = new Set<string>();
  * host only loads the transcript of the session you are in — a panel row for a
  * subagent you never opened has nothing to read otherwise. Syncing per refresh
  * tick would be a request per tick, so the guard is a module-level Set; after the
- * first ask the data layer keeps the cache current itself. Both a synchronous
- * throw and a rejected promise are swallowed: a session whose messages cannot be
- * loaded simply has no `NN% ctx`.
+ * first ask the data layer keeps the cache current itself.
+ *
+ * The mark is made *before* the call, so a second ask in the same tick is one
+ * `Set` lookup and never a second request, and dropped again when the ask fails:
+ * a sync that throws synchronously never gets to keep it, and a rejected promise
+ * drops it as it settles. Without that, a transient failure would be
+ * indistinguishable from success for the rest of the generation and the session
+ * would keep a cold cache with nothing left to retry it.
+ *
+ * ponytail: the ceiling of dropping the mark is that a session failing every
+ * time is re-asked on every call that reads the guard — once per tick in the
+ * sidebar — and a rejection settling late can drop the mark of a retry that
+ * already succeeded, costing one redundant sync. Both are cheap and self-healing;
+ * version the marks if either ever shows up as traffic.
  */
 export function ensureMessages(context: MessageCache, sessionID: string | undefined): void {
   if (!sessionID || SYNCED_MESSAGES.has(sessionID)) return;
   SYNCED_MESSAGES.add(sessionID);
   try {
-    void context.data.session.message.sync(sessionID).catch(() => {});
+    void context.data.session.message.sync(sessionID).catch(() => {
+      SYNCED_MESSAGES.delete(sessionID);
+    });
   } catch {
-    // No messages, no segment — never an error.
+    // No messages, no segment — never an error — but leave the id unmarked so a
+    // later call can try again.
+    SYNCED_MESSAGES.delete(sessionID);
   }
 }
 
@@ -207,20 +222,38 @@ const SYNCED_PERMISSIONS = new Set<string>();
  * you are in: a subagent blocked on a permission answers "none" until someone
  * syncs it, which would hide the one signal a user must not miss. Both the
  * panel rows and the sidebar widget read that cache, so both ask here instead of
- * each carrying its own copy. Empty and repeated ids are skipped, and both a
- * synchronous throw and a rejected promise are swallowed: a session whose
- * permissions cannot be loaded simply has no `⚠`.
+ * each carrying its own copy. Empty and repeated ids are skipped, and neither
+ * kind of failure is allowed to be remembered as success — see `ensureMessages`,
+ * whose guard this is the same rule as.
  */
 export function ensureSessions(context: PermissionSync, sessionIDs: readonly string[]): void {
   for (const sessionID of sessionIDs) {
     if (!sessionID || SYNCED_PERMISSIONS.has(sessionID)) continue;
     SYNCED_PERMISSIONS.add(sessionID);
     try {
-      void context.data.session.permission.sync(sessionID).catch(() => {});
+      void context.data.session.permission.sync(sessionID).catch(() => {
+        SYNCED_PERMISSIONS.delete(sessionID);
+      });
     } catch {
-      // No permissions, no marker — never an error.
+      // No permissions, no marker — never an error — but leave the id unmarked
+      // so a later call can try again.
+      SYNCED_PERMISSIONS.delete(sessionID);
     }
   }
+}
+
+/**
+ * Forget every synced session, so a fresh `setup()` starts a clean generation.
+ *
+ * The guards are module state, and a plugin teardown can be followed by another
+ * `setup()` in the same process (a reload, a plugin re-enable). Without this the
+ * second generation inherits the first one's marks, issues no sync at all, and
+ * loses the permission marker for the life of the process. Called from the
+ * teardown next to the slot releases, never instead of them.
+ */
+export function resetSyncGuards(): void {
+  SYNCED_MESSAGES.clear();
+  SYNCED_PERMISSIONS.clear();
 }
 
 /**
