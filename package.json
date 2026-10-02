@@ -24,6 +24,11 @@
     "tui",
     "subagent"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OJPalenzuela/opencode-subagent-view.git"
+  },
+  "homepage": "https://github.com/OJPalenzuela/opencode-subagent-view#readme",
   "license": "MIT",
   "engines": {
     "node": ">=22.13"
