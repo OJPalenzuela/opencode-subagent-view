@@ -382,9 +382,10 @@ function rowParts(row, now) {
   const pending = row.needsPermission ? ` ${PERMISSION_GLYPH}` : "";
   const labelLine = `${current} ${MARKERS[state].bracketed} ${INDENT.repeat(depth)}${label}${pending}`;
   const elapsed = elapsedMs(row, now);
+  const tokenCount = finite(row.tokens);
   const head = [
     elapsed === void 0 ? "" : `\u23F1 ${formatDuration(elapsed)}`,
-    row.tokens === void 0 || row.tokens <= 0 ? "" : `${formatExactTokens(row.tokens)} tok`
+    tokenCount === void 0 || tokenCount <= 0 ? "" : `${formatExactTokens(tokenCount)} tok`
   ].filter((part) => part !== "").join("  ");
   const rest = [];
   if (row.cost !== void 0 && row.cost > 0) rest.push(formatCost(row.cost));

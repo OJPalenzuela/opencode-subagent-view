@@ -265,11 +265,14 @@ export function rowParts(row: SubagentRow, now: number): RowParts {
   const labelLine = `${current} ${MARKERS[state].bracketed} ${INDENT.repeat(depth)}${label}${pending}`;
 
   const elapsed = elapsedMs(row, now);
+  // `finite` first: `NaN <= 0` and `Infinity > 0` are both true/false in ways
+  // that would let a non-finite count reach the formatter and print `0 tok`.
+  const tokenCount = finite(row.tokens);
   // Elapsed and tokens lead the line and carry the wider gap; whatever else
   // exists joins with the shared separator.
   const head = [
     elapsed === undefined ? "" : `⏱ ${formatDuration(elapsed)}`,
-    row.tokens === undefined || row.tokens <= 0 ? "" : `${formatExactTokens(row.tokens)} tok`,
+    tokenCount === undefined || tokenCount <= 0 ? "" : `${formatExactTokens(tokenCount)} tok`,
   ].filter((part) => part !== "").join("  ");
 
   const rest: string[] = [];

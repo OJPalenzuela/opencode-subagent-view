@@ -328,6 +328,12 @@ describe("rowParts", () => {
     expect(parts.meta).toBe("      ↳ ⏱ 00:00");
   });
 
+  it("drops a non-finite token count instead of printing 0 tok", () => {
+    expect(rowParts(row({ label: "plan", tokens: Number.NaN }), T0).meta).toBe("");
+    expect(rowParts(row({ label: "plan", tokens: Number.POSITIVE_INFINITY }), T0).meta).toBe("");
+    expect(rowParts(row({ label: "plan", tokens: Number.NEGATIVE_INFINITY }), T0).meta).toBe("");
+  });
+
   it("gates the cost and the context percentage, keeping that one last", () => {
     const withCost = rowParts(row({ label: "explore", tokens: 19_212, cost: 0.04 }), T0);
     expect(withCost.meta).toBe("      ↳ 19,212 tok · $0.04");
