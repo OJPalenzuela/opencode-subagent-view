@@ -49,6 +49,45 @@ j/k move · enter open · c completed · f fullscreen · esc close
 Keys are only active while the panel owns the keyboard, so typing `j` in the
 prompt keeps inserting text.
 
+## Completion alerts
+
+When a subagent of the session you are in finishes, the plugin announces it:
+
+```
+explore
+succeeded · ⏱ 02:34 · 12.4k tok · $0.04
+```
+
+The agent label is the title, the message is the real outcome followed by the
+segments that exist — elapsed time, tokens, cost — with anything missing left
+out. `failed` and `interrupted` read as themselves, so an alert never sounds
+like a success.
+
+The `subagent_done` sound and the desktop notification only play while the
+window is **blurred**, so a subagent finishing does not interrupt you in the
+middle of a prompt. OpenCode handles the focus check.
+
+Alerts are diffed against the previous refresh, one per finished subagent:
+
+- A reload or TUI restart never replays subagents that already finished.
+- The same subagent is announced once, however much its numbers change after.
+- A subagent that was created and finished between two refreshes still counts.
+
+## Footer counters
+
+The session prompt footer carries the same counts line as the panel header:
+
+```
+Subagents  2 run · 1 done · 0 err
+```
+
+It appears once the current session has at least one subagent and stays as long
+as there is one to report. Nothing is rendered without a session or without a
+subagent to count.
+
+If you also set the status line's `slot` option to `"prompt.footer.status"`, both
+appear in that same area, stacked.
+
 ## Requirements
 
 - OpenCode **v2** (TUI plugin API `@opencode/plugin` `>=2`)
@@ -109,6 +148,9 @@ Restart the TUI after editing the config.
 | Partial data | Missing model/cost/tokens/time are omitted; nothing throws |
 | Panel rows | Root resolved by walking `parentID`; grandchildren included |
 | Panel permissions | Cached with `session.permission.sync` on open, and on every `permission.asked` |
+| Completion alerts | Diffed per refresh; sound and notification only while blurred |
+| Alert priming | The first snapshot is a baseline, so a reload announces nothing |
+| Footer counters | `prompt.footer.status`, session id from the slot input; hidden with no session or no subagents |
 
 > Whether both slots are actually published inside a *subagent* session view is
 > TUI-runtime behaviour that cannot be checked from a shell. Confirm the line
@@ -119,14 +161,15 @@ Restart the TUI after editing the config.
 
 ```bash
 pnpm install && pnpm build   # emit dist/tui.js
-pnpm test                    # unit tests for the formatting helpers and selectors
+pnpm test                    # unit tests for formatting, selectors and alerts
 pnpm typecheck               # tsc --noEmit
 ```
 
-Formatting logic lives in `src/format.ts` and the panel selectors in
-`src/subagents.ts`. Both are deliberately free of TUI imports, and every
+Formatting logic lives in `src/format.ts`, the panel selectors in
+`src/subagents.ts`, and the completion tracker and alert text in
+`src/alerts.ts`. All three are deliberately free of TUI imports, and every
 look-up is injected as a parameter, so they can be unit tested in isolation.
-`src/panel.tsx` and `src/tui.tsx` only wire them to the host.
+`src/panel.tsx`, `src/footer.tsx` and `src/tui.tsx` only wire them to the host.
 
 ## Release
 

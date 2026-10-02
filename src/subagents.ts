@@ -225,3 +225,15 @@ export function rowLine(row: SubagentRow, now: number): string {
 export function headerLine(total: SubagentCounts): string {
   return `Subagents  ${total.running} run · ${total.done} done · ${total.failed} err`;
 }
+
+/**
+ * `headerLine`, or `undefined` when the root has no subagent to report — the
+ * footer says exactly what the panel header says rather than a second shape.
+ *
+ * A permanent counter is acceptable here because it only appears for sessions
+ * that actually spawned subagents, and it restates counts the panel already
+ * shows instead of adding new information.
+ */
+export function footerText(total: SubagentCounts): string | undefined {
+  return total.running + total.done + total.failed > 0 ? headerLine(total) : undefined;
+}

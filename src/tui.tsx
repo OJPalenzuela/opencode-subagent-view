@@ -1,12 +1,14 @@
 /**
  * OpenCode v2 TUI plugin: live stats for the subagent session you are inside,
- * plus the `/subagents` panel listing every subagent of the root session.
+ * plus the `/subagents` panel listing every subagent of the root session, a
+ * count on the home footer, and an alert when a subagent finishes.
  *
  * When the routed session is a subagent session (`parentID` set), this renders a
  * single line above the composer — state dot, agent label, model, elapsed time
  * and token usage — and keeps it current from two sources: a one-second tick for
  * the clock and a coalesced data listener for record changes. The same refresh
- * signal feeds the `subagent-view.panel` contribution.
+ * signal feeds the `subagent-view.panel` contribution, the footer counter and
+ * the completion alerts.
  */
 
 import { Plugin } from "@opencode/plugin/tui";
@@ -15,8 +17,13 @@ import type { JSX } from "@opentui/solid";
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { buildSummary } from "./format.js";
 import type { SessionLike, SessionStatus } from "./format.js";
+import { createCompletionTracker, finishedMessage } from "./alerts.js";
+import type { CompletionTracker, FinishedSubagent } from "./alerts.js";
 import { COMMAND_IDS } from "./commands.js";
+import { registerFooter } from "./footer.js";
 import { PANEL_NAME, registerPanel } from "./panel.js";
+import { collectSubagents } from "./subagents.js";
+import type { SubagentSession } from "./subagents.js";
 import { MARKERS, resolveFg, SUBDUED_FALLBACK, SUBDUED_TOKEN } from "./theme.js";
 
 const PLUGIN_ID = "subagent-view";
@@ -42,6 +49,64 @@ function safeStatus(context: Context, sessionID: string | undefined): SessionSta
     return context.data.session.status(sessionID);
   } catch {
     return undefined;
+  }
+}
+
+function safeList(context: Context): SubagentSession[] {
+  try {
+    return (context.data.session.list() ?? []) as SubagentSession[];
+  } catch {
+    return [];
+  }
+}
+
+/** The session the router is on, or `undefined` on `home` and `plugin` routes. */
+function currentSession(context: Context): string | undefined {
+  try {
+    const route = context.ui.router.current();
+    return route.type === "session" ? route.sessionID : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Announce every subagent that finished since the last refresh.
+ *
+ * Fire and forget: the alert must never block a refresh, and both the read and
+ * the notify are swallowed because the alert path is decoration on top of the
+ * status line, never a reason to fail a render. Focus filtering is the host's
+ * job (`when: "blurred"`), so there is no focus detection here.
+ *
+ * ponytail: one alert per finished subagent with no burst cap — a burst is
+ * genuinely that many subagents finishing. Add a cap if bursts prove annoying.
+ */
+function announceFinished(
+  context: Context,
+  tracker: CompletionTracker,
+  sessionID: string,
+  now: number,
+): void {
+  let finished: FinishedSubagent[];
+  try {
+    finished = tracker.update(collectSubagents(safeList(context), sessionID));
+  } catch {
+    return;
+  }
+
+  for (const row of finished) {
+    try {
+      void context.attention
+        .notify({
+          title: row.label,
+          message: finishedMessage(row, now),
+          sound: { name: "subagent_done", when: "blurred" },
+          notification: { when: "blurred" },
+        })
+        .catch(() => {});
+    } catch {
+      // An unavailable attention layer must not break a refresh.
+    }
   }
 }
 
@@ -146,12 +211,28 @@ export default Plugin.define({
   setup(context) {
     const [tick, setTick] = createSignal(0);
     let lastRefreshAt = 0;
+    let tracker = createCompletionTracker();
+    let trackedSession = "";
 
     const requestRefresh = () => {
       const stamp = Date.now();
       if (stamp - lastRefreshAt < REFRESH_COALESCE_MS) return;
       lastRefreshAt = stamp;
       setTick((value) => value + 1);
+
+      // Off a session route there is no root to watch. Staying unarmed matters:
+      // a reload on the home screen must not make the first session it sees
+      // replay every subagent that already finished.
+      const sessionID = currentSession(context);
+      if (sessionID === undefined) return;
+
+      // A different tree gets a fresh baseline instead of announcing all of its
+      // finished subagents. Moving between sessions of one root is the price.
+      if (sessionID !== trackedSession) {
+        tracker = createCompletionTracker();
+        trackedSession = sessionID;
+      }
+      announceFinished(context, tracker, sessionID, stamp);
     };
 
     const stopEvents = context.data.listen(requestRefresh);
@@ -165,6 +246,7 @@ export default Plugin.define({
         render: (input) => renderStatus(context, input.sessionID, tick),
       });
     const releasePanel = registerPanel(context, tick);
+    const releaseFooter = registerFooter(context, tick);
     const releaseCommand = context.ui.slot({
       append: "app",
       render: () => <PanelCommand context={context} />,
@@ -174,6 +256,7 @@ export default Plugin.define({
       stopEvents?.();
       release?.();
       releasePanel?.();
+      releaseFooter?.();
       releaseCommand?.();
     };
   },

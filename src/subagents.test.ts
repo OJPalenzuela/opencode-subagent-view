@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { collectSubagents, counts, headerLine, orderRows, rowLine, stateOf, visibleRows } from "./subagents.js";
+import {
+  collectSubagents,
+  counts,
+  footerText,
+  headerLine,
+  orderRows,
+  rowLine,
+  stateOf,
+  visibleRows,
+} from "./subagents.js";
 import type { SubagentRow, SubagentSession } from "./subagents.js";
 
 const T0 = 1_700_000_000_000;
@@ -302,5 +311,24 @@ describe("headerLine", () => {
 
   it("renders zeroes", () => {
     expect(headerLine({ running: 0, done: 0, failed: 0 })).toBe("Subagents  0 run · 0 done · 0 err");
+  });
+});
+
+describe("footerText", () => {
+  it("reports nothing when the root has no subagents", () => {
+    expect(footerText({ running: 0, done: 0, failed: 0 })).toBeUndefined();
+  });
+
+  it("reuses the header line as soon as one subagent is known", () => {
+    expect(footerText({ running: 0, done: 1, failed: 0 })).toBe("Subagents  0 run · 1 done · 0 err");
+  });
+
+  it("stays visible while work is running or has failed", () => {
+    expect(footerText({ running: 2, done: 0, failed: 1 })).toBe("Subagents  2 run · 0 done · 1 err");
+  });
+
+  it("is the header line, not a second text shape", () => {
+    const total = { running: 2, done: 1, failed: 1 };
+    expect(footerText(total)).toBe(headerLine(total));
   });
 });

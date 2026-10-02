@@ -1,14 +1,14 @@
 // src/tui.tsx
-import { createComponent as _$createComponent2 } from "@opentui/solid";
-import { effect as _$effect2 } from "@opentui/solid";
+import { createComponent as _$createComponent3 } from "@opentui/solid";
+import { effect as _$effect3 } from "@opentui/solid";
 import { memo as _$memo } from "@opentui/solid";
 import { createTextNode as _$createTextNode2 } from "@opentui/solid";
 import { insertNode as _$insertNode2 } from "@opentui/solid";
-import { insert as _$insert2 } from "@opentui/solid";
-import { setProp as _$setProp2 } from "@opentui/solid";
-import { createElement as _$createElement2 } from "@opentui/solid";
+import { insert as _$insert3 } from "@opentui/solid";
+import { setProp as _$setProp3 } from "@opentui/solid";
+import { createElement as _$createElement3 } from "@opentui/solid";
 import { Plugin } from "@opencode/plugin/tui";
-import { Show as Show2, createEffect as createEffect2, createMemo as createMemo2, createSignal as createSignal2, onCleanup as onCleanup2 } from "solid-js";
+import { Show as Show3, createEffect as createEffect2, createMemo as createMemo3, createSignal as createSignal2, onCleanup as onCleanup2 } from "solid-js";
 
 // src/format.ts
 var STATE = {
@@ -96,6 +96,45 @@ function buildSummary(session, now, status) {
   };
 }
 
+// src/alerts.ts
+var ALERTED = /* @__PURE__ */ new Set(["succeeded", "failed", "interrupted"]);
+var SEPARATOR2 = " \xB7 ";
+function alertedOutcome(row) {
+  return row.outcome !== void 0 && ALERTED.has(row.outcome) ? row.outcome : void 0;
+}
+function finishedMessage(row, now) {
+  const parts = [row.outcome];
+  const elapsed = elapsedMs(row, now);
+  if (elapsed !== void 0) parts.push(`\u23F1 ${formatDuration(elapsed)}`);
+  if (row.tokens !== void 0 && row.tokens > 0) parts.push(`${formatTokens(row.tokens)} tok`);
+  if (row.cost !== void 0 && row.cost > 0) parts.push(formatCost(row.cost));
+  return parts.join(SEPARATOR2);
+}
+function createCompletionTracker() {
+  let seen = /* @__PURE__ */ new Map();
+  let armed = false;
+  return {
+    update(rows) {
+      const finished = [];
+      let snapshot;
+      for (const row of rows) {
+        if (typeof row?.id !== "string" || row.id === "") continue;
+        const next = snapshot ?? /* @__PURE__ */ new Map();
+        snapshot = next;
+        const outcome = alertedOutcome(row);
+        const previous = seen.get(row.id);
+        next.set(row.id, outcome ?? previous);
+        if (outcome !== void 0 && previous === void 0 && armed) {
+          finished.push({ ...row, outcome });
+        }
+      }
+      seen = snapshot ?? /* @__PURE__ */ new Map();
+      if (snapshot !== void 0 && snapshot.size > 0) armed = true;
+      return finished;
+    }
+  };
+}
+
 // src/commands.ts
 var COMMAND_IDS = {
   openPanel: "subagent-view.panel.open",
@@ -107,15 +146,13 @@ var COMMAND_IDS = {
   closePanel: "subagent-view.panel.close"
 };
 
-// src/panel.tsx
-import { effect as _$effect } from "@opentui/solid";
-import { createTextNode as _$createTextNode } from "@opentui/solid";
-import { insertNode as _$insertNode } from "@opentui/solid";
+// src/footer.tsx
 import { createComponent as _$createComponent } from "@opentui/solid";
-import { insert as _$insert } from "@opentui/solid";
 import { setProp as _$setProp } from "@opentui/solid";
+import { effect as _$effect } from "@opentui/solid";
+import { insert as _$insert } from "@opentui/solid";
 import { createElement as _$createElement } from "@opentui/solid";
-import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
+import { createMemo, Show } from "solid-js";
 
 // src/theme.ts
 var SUBDUED_TOKEN = "text.subdued";
@@ -285,12 +322,65 @@ function rowLine(row, now) {
 function headerLine(total) {
   return `Subagents  ${total.running} run \xB7 ${total.done} done \xB7 ${total.failed} err`;
 }
+function footerText(total) {
+  return total.running + total.done + total.failed > 0 ? headerLine(total) : void 0;
+}
+
+// src/footer.tsx
+function safeList(context) {
+  try {
+    return context.data.session.list() ?? [];
+  } catch {
+    return [];
+  }
+}
+function SubagentCounter(props) {
+  const text = createMemo(() => {
+    props.tick();
+    const sessionID = props.sessionID;
+    if (sessionID === void 0) return void 0;
+    return footerText(counts(collectSubagents(safeList(props.context), sessionID)));
+  });
+  return _$createComponent(Show, {
+    get when() {
+      return text();
+    },
+    get children() {
+      var _el$ = _$createElement("text");
+      _$insert(_el$, text);
+      _$effect((_$p) => _$setProp(_el$, "fg", resolveFg(props.context, SUBDUED_TOKEN, SUBDUED_FALLBACK), _$p));
+      return _el$;
+    }
+  });
+}
+function registerFooter(context, tick) {
+  return context.ui.slot({
+    // Additive: several claims at one anchor coexist in plugin enable order, so
+    // this stacks with the status line when `slot` is also `prompt.footer.status`.
+    append: "prompt.footer.status",
+    render: (input) => _$createComponent(SubagentCounter, {
+      context,
+      get sessionID() {
+        return input.sessionID;
+      },
+      tick
+    })
+  });
+}
 
 // src/panel.tsx
+import { effect as _$effect2 } from "@opentui/solid";
+import { createTextNode as _$createTextNode } from "@opentui/solid";
+import { insertNode as _$insertNode } from "@opentui/solid";
+import { createComponent as _$createComponent2 } from "@opentui/solid";
+import { insert as _$insert2 } from "@opentui/solid";
+import { setProp as _$setProp2 } from "@opentui/solid";
+import { createElement as _$createElement2 } from "@opentui/solid";
+import { createEffect, createMemo as createMemo2, createSignal, For, onCleanup, Show as Show2 } from "solid-js";
 var PANEL_NAME = "subagent-view.panel";
 var PREFS_KEY = "panel";
 var ELAPSED_TICK_MS = 1e3;
-function safeList(context) {
+function safeList2(context) {
   try {
     return context.data.session.list() ?? [];
   } catch {
@@ -340,14 +430,14 @@ function SubagentPanel(props) {
     const timer = setInterval(() => setNow(Date.now()), ELAPSED_TICK_MS);
     onCleanup(() => clearInterval(timer));
   });
-  const rows = createMemo(() => {
+  const rows = createMemo2(() => {
     props.tick();
     now();
-    return orderRows(visibleRows(collectSubagents(safeList(context), panel.sessionID, safeStatusLookup(context), safePermissionLookup(context)), prefs.showCompleted));
+    return orderRows(visibleRows(collectSubagents(safeList2(context), panel.sessionID, safeStatusLookup(context), safePermissionLookup(context)), prefs.showCompleted));
   });
   createEffect(() => {
     const sessionID = panel.sessionID;
-    const ids = [sessionID, ...collectSubagents(safeList(context), sessionID).map((row) => row.id)];
+    const ids = [sessionID, ...collectSubagents(safeList2(context), sessionID).map((row) => row.id)];
     void Promise.allSettled(ids.map((id) => safeSync(context, id)));
   });
   const stopPermission = context.data.on("permission.asked", (event) => {
@@ -422,42 +512,42 @@ function SubagentPanel(props) {
     return resolveFg(context, marker.token, marker.fallback);
   };
   return (() => {
-    var _el$ = _$createElement("box"), _el$2 = _$createElement("text"), _el$3 = _$createElement("text");
+    var _el$ = _$createElement2("box"), _el$2 = _$createElement2("text"), _el$3 = _$createElement2("text");
     _$insertNode(_el$, _el$2);
     _$insertNode(_el$, _el$3);
-    _$setProp(_el$, "flexDirection", "column");
-    _$insert(_el$2, header);
-    _$insert(_el$, _$createComponent(Show, {
+    _$setProp2(_el$, "flexDirection", "column");
+    _$insert2(_el$2, header);
+    _$insert2(_el$, _$createComponent2(Show2, {
       get when() {
         return rows().length > 0;
       },
       get fallback() {
         return (() => {
-          var _el$5 = _$createElement("text");
+          var _el$5 = _$createElement2("text");
           _$insertNode(_el$5, _$createTextNode(`No subagents in this session`));
-          _$effect((_$p) => _$setProp(_el$5, "fg", subdued(), _$p));
+          _$effect2((_$p) => _$setProp2(_el$5, "fg", subdued(), _$p));
           return _el$5;
         })();
       },
       get children() {
-        return _$createComponent(For, {
+        return _$createComponent2(For, {
           get each() {
             return rows();
           },
           children: (row, index) => (() => {
-            var _el$7 = _$createElement("text");
-            _$insert(_el$7, () => rowLine(row, now()));
-            _$effect((_$p) => _$setProp(_el$7, "fg", rowFg(row, index()), _$p));
+            var _el$7 = _$createElement2("text");
+            _$insert2(_el$7, () => rowLine(row, now()));
+            _$effect2((_$p) => _$setProp2(_el$7, "fg", rowFg(row, index()), _$p));
             return _el$7;
           })()
         });
       }
     }), _el$3);
     _$insertNode(_el$3, _$createTextNode(`j/k move \xB7 enter open \xB7 c completed \xB7 f fullscreen \xB7 esc close`));
-    _$effect((_p$) => {
+    _$effect2((_p$) => {
       var _v$ = resolveFg(context, SELECTED_TOKEN, SELECTED_FALLBACK), _v$2 = subdued();
-      _v$ !== _p$.e && (_p$.e = _$setProp(_el$2, "fg", _v$, _p$.e));
-      _v$2 !== _p$.t && (_p$.t = _$setProp(_el$3, "fg", _v$2, _p$.t));
+      _v$ !== _p$.e && (_p$.e = _$setProp2(_el$2, "fg", _v$, _p$.e));
+      _v$2 !== _p$.t && (_p$.t = _$setProp2(_el$3, "fg", _v$2, _p$.t));
       return _p$;
     }, {
       e: void 0,
@@ -469,12 +559,12 @@ function SubagentPanel(props) {
 function registerPanel(context, tick) {
   return context.ui.slot({
     append: "session.panel",
-    render: (panel) => _$createComponent(Show, {
+    render: (panel) => _$createComponent2(Show2, {
       get when() {
         return panel.name === PANEL_NAME;
       },
       get children() {
-        return _$createComponent(SubagentPanel, {
+        return _$createComponent2(SubagentPanel, {
           context,
           panel,
           tick
@@ -506,6 +596,46 @@ function safeStatus(context, sessionID) {
     return void 0;
   }
 }
+function safeList3(context) {
+  try {
+    return context.data.session.list() ?? [];
+  } catch {
+    return [];
+  }
+}
+function currentSession(context) {
+  try {
+    const route = context.ui.router.current();
+    return route.type === "session" ? route.sessionID : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function announceFinished(context, tracker, sessionID, now) {
+  let finished;
+  try {
+    finished = tracker.update(collectSubagents(safeList3(context), sessionID));
+  } catch {
+    return;
+  }
+  for (const row of finished) {
+    try {
+      void context.attention.notify({
+        title: row.label,
+        message: finishedMessage(row, now),
+        sound: {
+          name: "subagent_done",
+          when: "blurred"
+        },
+        notification: {
+          when: "blurred"
+        }
+      }).catch(() => {
+      });
+    } catch {
+    }
+  }
+}
 function SubagentStatus(props) {
   const [now, setNow] = createSignal2(Date.now());
   createEffect2(() => {
@@ -518,37 +648,37 @@ function SubagentStatus(props) {
     props.context.data.session.sync(sessionID).catch(() => {
     });
   });
-  const record = createMemo2(() => {
+  const record = createMemo3(() => {
     props.tick();
     return safeGet(props.context, props.sessionID);
   });
-  const isSubagent = createMemo2(() => {
+  const isSubagent = createMemo3(() => {
     now();
     return Boolean(record()?.parentID);
   });
-  const summary = createMemo2(() => buildSummary(record() ?? {}, now(), safeStatus(props.context, props.sessionID)));
+  const summary = createMemo3(() => buildSummary(record() ?? {}, now(), safeStatus(props.context, props.sessionID)));
   const marker = () => MARKERS[summary().state];
-  return _$createComponent2(Show2, {
+  return _$createComponent3(Show3, {
     get when() {
       return isSubagent();
     },
     get children() {
-      var _el$ = _$createElement2("box"), _el$2 = _$createElement2("text"), _el$3 = _$createElement2("text"), _el$4 = _$createTextNode2(` `), _el$5 = _$createElement2("text");
+      var _el$ = _$createElement3("box"), _el$2 = _$createElement3("text"), _el$3 = _$createElement3("text"), _el$4 = _$createTextNode2(` `), _el$5 = _$createElement3("text");
       _$insertNode2(_el$, _el$2);
       _$insertNode2(_el$, _el$3);
       _$insertNode2(_el$, _el$5);
-      _$setProp2(_el$, "flexDirection", "row");
-      _$insert2(_el$2, () => marker().glyph);
+      _$setProp3(_el$, "flexDirection", "row");
+      _$insert3(_el$2, () => marker().glyph);
       _$insertNode2(_el$3, _el$4);
-      _$insert2(_el$3, () => summary().label, null);
-      _$insert2(_el$5, (() => {
+      _$insert3(_el$3, () => summary().label, null);
+      _$insert3(_el$5, (() => {
         var _c$ = _$memo(() => !!summary().text);
         return () => _c$() ? ` ${summary().text}` : "";
       })());
-      _$effect2((_p$) => {
+      _$effect3((_p$) => {
         var _v$ = resolveFg(props.context, marker().token, marker().fallback), _v$2 = resolveFg(props.context, SUBDUED_TOKEN, SUBDUED_FALLBACK);
-        _v$ !== _p$.e && (_p$.e = _$setProp2(_el$2, "fg", _v$, _p$.e));
-        _v$2 !== _p$.t && (_p$.t = _$setProp2(_el$5, "fg", _v$2, _p$.t));
+        _v$ !== _p$.e && (_p$.e = _$setProp3(_el$2, "fg", _v$, _p$.e));
+        _v$2 !== _p$.t && (_p$.t = _$setProp3(_el$5, "fg", _v$2, _p$.t));
         return _p$;
       }, {
         e: void 0,
@@ -562,7 +692,7 @@ function resolveSlot(value) {
   return value === SLOT_FOOTER ? SLOT_FOOTER : SLOT_DEFAULT;
 }
 function renderStatus(context, sessionID, tick) {
-  return _$createComponent2(SubagentStatus, {
+  return _$createComponent3(SubagentStatus, {
     context,
     sessionID: sessionID ?? "",
     tick
@@ -590,11 +720,20 @@ var tui_default = Plugin.define({
   setup(context) {
     const [tick, setTick] = createSignal2(0);
     let lastRefreshAt = 0;
+    let tracker = createCompletionTracker();
+    let trackedSession = "";
     const requestRefresh = () => {
       const stamp = Date.now();
       if (stamp - lastRefreshAt < REFRESH_COALESCE_MS) return;
       lastRefreshAt = stamp;
       setTick((value) => value + 1);
+      const sessionID = currentSession(context);
+      if (sessionID === void 0) return;
+      if (sessionID !== trackedSession) {
+        tracker = createCompletionTracker();
+        trackedSession = sessionID;
+      }
+      announceFinished(context, tracker, sessionID, stamp);
     };
     const stopEvents = context.data.listen(requestRefresh);
     const release = resolveSlot(context.options.slot) === SLOT_FOOTER ? context.ui.slot({
@@ -605,9 +744,10 @@ var tui_default = Plugin.define({
       render: (input) => renderStatus(context, input.sessionID, tick)
     });
     const releasePanel = registerPanel(context, tick);
+    const releaseFooter = registerFooter(context, tick);
     const releaseCommand = context.ui.slot({
       append: "app",
-      render: () => _$createComponent2(PanelCommand, {
+      render: () => _$createComponent3(PanelCommand, {
         context
       })
     });
@@ -615,6 +755,7 @@ var tui_default = Plugin.define({
       stopEvents?.();
       release?.();
       releasePanel?.();
+      releaseFooter?.();
       releaseCommand?.();
     };
   }
