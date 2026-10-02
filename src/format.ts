@@ -14,6 +14,9 @@ const STATE = {
   UNKNOWN: "unknown",
 } as const;
 
+/** Re-exported so callers switch on named states instead of bare strings. */
+export { STATE };
+
 export type State = (typeof STATE)[keyof typeof STATE];
 
 /** Terminal outcome reported by the server, once the subagent finished. */
@@ -84,6 +87,8 @@ function finite(value: number | undefined): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+export { finite };
+
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
 }
@@ -97,6 +102,13 @@ export function formatDuration(ms: number): string {
   return hours > 0
     ? `${pad2(hours)}:${pad2(minutes)}:${pad2(seconds)}`
     : `${pad2(minutes)}:${pad2(seconds)}`;
+}
+
+/** USD with two decimals: `$0.00`, `$0.04`, `$12.30`. Non-numbers clamp to zero. */
+export function formatCost(usd: number): string {
+  const value = finite(usd);
+  if (value === undefined || value < 0) return "$0.00";
+  return `$${value.toFixed(2)}`;
 }
 
 /**
@@ -116,17 +128,24 @@ export function formatTokens(n: number): string {
   return `${(total / unit.size).toFixed(1)}${unit.suffix}`;
 }
 
-function deriveState(session: SessionLike, status: SessionStatus | undefined): State {
+/** Narrowest shape that decides a state: satisfied by records and rows alike. */
+interface OutcomeCarrier {
+  readonly outcome?: Outcome;
+}
+
+function deriveState(session: OutcomeCarrier, status: SessionStatus | undefined): State {
   const outcome = session.outcome;
   if (outcome !== undefined) return OUTCOME_STATE[outcome] ?? STATE.UNKNOWN;
   return status === "running" ? STATE.RUNNING : STATE.UNKNOWN;
 }
 
+export { deriveState };
+
 /**
  * Elapsed wall time. While the subagent runs it tracks `now`; once an `outcome`
  * is present the clock freezes at `time.idle ?? time.updated`.
  */
-function elapsedMs(session: SessionLike, now: number): number | undefined {
+function elapsedMs(session: OutcomeCarrier & { readonly time?: SessionTime }, now: number): number | undefined {
   const created = finite(session.time?.created);
   if (created === undefined) return undefined;
   const end = session.outcome !== undefined
@@ -134,6 +153,8 @@ function elapsedMs(session: SessionLike, now: number): number | undefined {
     : now;
   return end - created;
 }
+
+export { elapsedMs };
 
 /** Build the label, the ordered segments and the joined one-line text. */
 export function buildSummary(

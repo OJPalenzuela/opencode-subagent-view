@@ -11,6 +11,42 @@ state dot, agent name, model, elapsed time and tokens, e.g.
 
 It renders nothing in root sessions, so it stays out of the way everywhere else.
 
+## Subagents panel
+
+Inside a session, run `/subagents` (or pick **Subagents panel** from the command
+palette) to open a panel listing every subagent of that session's root — direct
+children and grandchildren, one row each:
+
+```
+Subagents  2 run · 1 done · 0 err
+  ● explore · claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok
+    ○ review · gpt-5 · ⏱ 00:12 · 3.1k tok
+› ✓ build · claude-sonnet-4-6 · ⏱ 01:04 · 8.0k tok · $0.04
+  ● docs · claude-sonnet-4-6 · ⏱ 00:03 · 1.2k tok ⚠
+j/k move · enter open · c completed · f fullscreen · esc close
+```
+
+- `●` running, `✓` done, `✕` failed, `⊘` interrupted, `○` unknown — same markers
+  as the status line.
+- Rows are indented by depth, so nested subagents sit under their parent.
+- ⚠ marks a session with a permission request waiting for an answer.
+- `›` marks the session you are currently in.
+- The first rows are the ones that need you: pending permissions, then running,
+  then the most recent activity.
+
+### Keys
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Move the selection down / up |
+| `enter` | Open the selected subagent session (the panel stays open) |
+| `c` | Show or hide completed, failed and interrupted subagents (persisted) |
+| `f` | Toggle full screen |
+| `esc` | Close the panel |
+
+Keys are only active while the panel owns the keyboard, so typing `j` in the
+prompt keeps inserting text.
+
 ## Requirements
 
 - OpenCode **v2** (TUI plugin API `@opencode/plugin` `>=2`)
@@ -69,6 +105,8 @@ Restart the TUI after editing the config.
 | Session switch | `data.session.sync(sessionID)` on change |
 | State markers | `●` running, `✓` done, `✕` failed, `⊘` interrupted, `○` unknown |
 | Partial data | Missing model/tokens/time are omitted; nothing throws |
+| Panel rows | Root resolved by walking `parentID`; grandchildren included |
+| Panel permissions | Cached with `session.permission.sync` on open, and on every `permission.asked` |
 
 > Whether both slots are actually published inside a *subagent* session view is
 > TUI-runtime behaviour that cannot be checked from a shell. Confirm the line
@@ -79,12 +117,14 @@ Restart the TUI after editing the config.
 
 ```bash
 pnpm install && pnpm build   # emit dist/tui.js
-pnpm test                    # unit tests for the formatting helpers
+pnpm test                    # unit tests for the formatting helpers and selectors
 pnpm typecheck               # tsc --noEmit
 ```
 
-Formatting logic lives in `src/format.ts` and is deliberately free of TUI imports
-so it can be unit tested in isolation.
+Formatting logic lives in `src/format.ts` and the panel selectors in
+`src/subagents.ts`. Both are deliberately free of TUI imports, and every
+look-up is injected as a parameter, so they can be unit tested in isolation.
+`src/panel.tsx` and `src/tui.tsx` only wire them to the host.
 
 ## Release
 

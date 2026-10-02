@@ -1,10 +1,12 @@
 /**
- * OpenCode v2 TUI plugin: live stats for the subagent session you are inside.
+ * OpenCode v2 TUI plugin: live stats for the subagent session you are inside,
+ * plus the `/subagents` panel listing every subagent of the root session.
  *
  * When the routed session is a subagent session (`parentID` set), this renders a
  * single line above the composer — state dot, agent label, model, elapsed time
  * and token usage — and keeps it current from two sources: a one-second tick for
- * the clock and a coalesced data listener for record changes.
+ * the clock and a coalesced data listener for record changes. The same refresh
+ * signal feeds the `subagent-view.panel` contribution.
  */
 
 import { Plugin } from "@opencode/plugin/tui";
@@ -12,47 +14,16 @@ import type { Context } from "@opencode/plugin/tui/context";
 import type { JSX } from "@opentui/solid";
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { buildSummary } from "./format.js";
-import type { SessionLike, SessionStatus, State } from "./format.js";
+import type { SessionLike, SessionStatus } from "./format.js";
+import { PANEL_NAME, registerPanel } from "./panel.js";
+import { MARKERS, resolveFg, SUBDUED_FALLBACK, SUBDUED_TOKEN } from "./theme.js";
 
 const PLUGIN_ID = "subagent-view";
 const ELAPSED_TICK_MS = 1_000;
 const REFRESH_COALESCE_MS = 200;
-const SUBDUED_TOKEN = "text.subdued";
-const SUBDUED_FALLBACK = "#546e7a";
 
 const SLOT_DEFAULT = "session.composer.top";
 const SLOT_FOOTER = "prompt.footer.status";
-
-/** Marker glyph per state, paired with the theme token used to color it. */
-const MARKERS = {
-  running: { glyph: "●", token: "text.feedback.warning.default", fallback: "#ffcb6b" },
-  done: { glyph: "✓", token: "text.feedback.success.default", fallback: "#c3e88d" },
-  error: { glyph: "✕", token: "text.feedback.error.default", fallback: "#f07178" },
-  interrupted: { glyph: "⊘", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },
-  unknown: { glyph: "○", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },
-} as const satisfies Record<State, { glyph: string; token: string; fallback: string }>;
-
-function colorToHex(value: unknown): string | undefined {
-  if (typeof value === "string") return value;
-  const buffer = (value as { buffer?: unknown } | undefined)?.buffer;
-  if (!Array.isArray(buffer)) return undefined;
-  const pair = (channel: unknown) =>
-    Math.max(0, Math.min(255, Math.round(Number(channel) || 0)))
-      .toString(16)
-      .padStart(2, "0");
-  return `#${pair(buffer[0])}${pair(buffer[1])}${pair(buffer[2])}`;
-}
-
-function resolveFg(context: Context, tokenPath: string, fallback: string): string {
-  try {
-    const value = tokenPath
-      .split(".")
-      .reduce<unknown>((acc, key) => (acc as Record<string, unknown>)?.[key], context.theme);
-    return colorToHex(value) ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
 
 /** Read a live record defensively: the data layer can be mid-invalidation. */
 function safeGet(context: Context, sessionID: string | undefined): SessionLike | undefined {
@@ -147,6 +118,28 @@ function renderStatus(
   return <SubagentStatus context={context} sessionID={sessionID ?? ""} tick={tick} />;
 }
 
+/**
+ * Owns the global keymap layer that opens the panel. It lives inside a component
+ * because `keymap.layer` scopes its commands to the calling owner.
+ */
+function PanelCommand(props: { readonly context: Context }) {
+  props.context.keymap.layer(() => ({
+    mode: "global",
+    commands: [
+      {
+        id: `${PLUGIN_ID}.panel.open`,
+        title: "Subagents panel",
+        slash: { name: "subagents" },
+        palette: true,
+        run: () => {
+          props.context.ui.panel.open(PANEL_NAME);
+        },
+      },
+    ],
+  }));
+  return null;
+}
+
 export default Plugin.define({
   id: PLUGIN_ID,
   setup(context) {
@@ -170,10 +163,17 @@ export default Plugin.define({
         append: SLOT_DEFAULT,
         render: (input) => renderStatus(context, input.sessionID, tick),
       });
+    const releasePanel = registerPanel(context, tick);
+    const releaseCommand = context.ui.slot({
+      append: "app",
+      render: () => <PanelCommand context={context} />,
+    });
 
     return () => {
       stopEvents?.();
       release?.();
+      releasePanel?.();
+      releaseCommand?.();
     };
   },
 });

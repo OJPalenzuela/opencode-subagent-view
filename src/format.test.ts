@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSummary, formatDuration, formatTokens } from "./format.js";
+import { buildSummary, formatCost, formatDuration, formatTokens } from "./format.js";
 import type { SessionLike } from "./format.js";
 
 const T0 = 1_700_000_000_000;
@@ -79,6 +79,29 @@ describe("formatTokens", () => {
     expect(formatTokens(-1)).toBe("0");
     expect(formatTokens(-1_200)).toBe("0");
     expect(formatTokens(Number.NaN)).toBe("0");
+  });
+});
+
+describe("formatCost", () => {
+  it("always shows two decimals with a dollar sign", () => {
+    expect(formatCost(0)).toBe("$0.00");
+    expect(formatCost(0.04)).toBe("$0.04");
+    expect(formatCost(1.23)).toBe("$1.23");
+    expect(formatCost(12.3)).toBe("$12.30");
+    expect(formatCost(1234.5)).toBe("$1234.50");
+  });
+
+  it("rounds to cents instead of leaking float noise", () => {
+    expect(formatCost(0.1 + 0.2)).toBe("$0.30");
+    expect(formatCost(1.005)).toBe("$1.00");
+    expect(formatCost(2.675)).toBe("$2.67");
+  });
+
+  it("clamps negatives and non-numbers to $0.00", () => {
+    expect(formatCost(-1)).toBe("$0.00");
+    expect(formatCost(-0.001)).toBe("$0.00");
+    expect(formatCost(Number.NaN)).toBe("$0.00");
+    expect(formatCost(Number.POSITIVE_INFINITY)).toBe("$0.00");
   });
 });
 
