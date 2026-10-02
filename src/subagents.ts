@@ -6,8 +6,9 @@
  * be mid-invalidation while the panel re-renders.
  */
 
-import { DEFAULT_LABEL, STATE, deriveState, finite } from "./format.js";
+import { DEFAULT_LABEL, STATE, deriveState, elapsedMs, finite, formatCost, formatDuration, formatTokens } from "./format.js";
 import type { Outcome, SessionLike, SessionStatus, SessionTime, State } from "./format.js";
+import { CURRENT_GLYPH, MARKERS, PERMISSION_GLYPH } from "./theme.js";
 
 /** `SessionLike` plus the identity and cost the panel needs. */
 export interface SubagentSession extends SessionLike {
@@ -197,4 +198,31 @@ export function counts(rows: readonly SubagentRow[]): SubagentCounts {
     }
   }
   return { running, done, failed };
+}
+
+const INDENT = "  ";
+
+/** `› ● explore · model · ⏱ 02:34 · 12.4k tok · $0.04 ⚠` */
+export function rowLine(row: SubagentRow, now: number): string {
+  const parts: string[] = [];
+  if (row.model) parts.push(row.model);
+
+  const elapsed = elapsedMs(row, now);
+  if (elapsed !== undefined) parts.push(`⏱ ${formatDuration(elapsed)}`);
+
+  if (row.tokens !== undefined && row.tokens > 0) parts.push(`${formatTokens(row.tokens)} tok`);
+  if (row.cost !== undefined && row.cost > 0) parts.push(formatCost(row.cost));
+
+  const current = row.isCurrent ? CURRENT_GLYPH : " ";
+  const glyph = MARKERS[stateOf(row, now)].glyph;
+  const indent = INDENT.repeat(Math.max(0, row.depth - 1));
+  const meta = parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
+  const pending = row.needsPermission ? ` ${PERMISSION_GLYPH}` : "";
+
+  return `${current} ${glyph} ${indent}${row.label}${meta}${pending}`;
+}
+
+/** Header counts line: `Subagents  2 run · 1 done · 0 err`. */
+export function headerLine(total: SubagentCounts): string {
+  return `Subagents  ${total.running} run · ${total.done} done · ${total.failed} err`;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectSubagents, counts, orderRows, stateOf, visibleRows } from "./subagents.js";
+import { collectSubagents, counts, headerLine, orderRows, rowLine, stateOf, visibleRows } from "./subagents.js";
 import type { SubagentRow, SubagentSession } from "./subagents.js";
 
 const T0 = 1_700_000_000_000;
@@ -251,5 +251,51 @@ describe("stateOf", () => {
     expect(stateOf(row({ status: "running" }), T0)).toBe("running");
     expect(stateOf(row({ status: "idle" }))).toBe("unknown");
     expect(stateOf(row())).toBe("unknown");
+  });
+});
+
+describe("rowLine", () => {
+  it("renders the documented row format", () => {
+    const line = rowLine(
+      row({
+        label: "explore",
+        model: "claude-sonnet-4-6",
+        tokens: 12400,
+        cost: 0.04,
+        status: "running",
+        time: { created: T0, updated: T0 },
+      }),
+      T0 + 154_000,
+    );
+    expect(line).toBe("  ● explore · claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok · $0.04");
+  });
+
+  it("marks the current session and indents by depth", () => {
+    const line = rowLine(
+      row({
+        label: "review",
+        isCurrent: true,
+        depth: 3,
+        outcome: "succeeded",
+        time: { created: T0, updated: T0 + 5_000 },
+      }),
+      T0 + 5_000,
+    );
+    expect(line).toBe("› ✓     review · ⏱ 00:05");
+  });
+
+  it("appends the permission marker and hides zero metrics", () => {
+    const line = rowLine(row({ label: "plan", needsPermission: true, tokens: 0, cost: 0 }), T0);
+    expect(line).toBe("  ○ plan ⚠");
+  });
+});
+
+describe("headerLine", () => {
+  it("renders the counts line", () => {
+    expect(headerLine({ running: 2, done: 1, failed: 0 })).toBe("Subagents  2 run · 1 done · 0 err");
+  });
+
+  it("renders zeroes", () => {
+    expect(headerLine({ running: 0, done: 0, failed: 0 })).toBe("Subagents  0 run · 0 done · 0 err");
   });
 });

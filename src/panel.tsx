@@ -11,8 +11,7 @@
 import type { Context, PanelInput } from "@opencode/plugin/tui/context";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import { COMMAND_IDS } from "./commands.js";
-import { elapsedMs, formatCost, formatDuration, formatTokens } from "./format.js";
-import { collectSubagents, counts, orderRows, stateOf, visibleRows } from "./subagents.js";
+import { collectSubagents, counts, headerLine, orderRows, rowLine, stateOf, visibleRows } from "./subagents.js";
 import type {
   PermissionLookup,
   StatusLookup,
@@ -20,9 +19,7 @@ import type {
   SubagentSession,
 } from "./subagents.js";
 import {
-  CURRENT_GLYPH,
   MARKERS,
-  PERMISSION_GLYPH,
   resolveFg,
   SELECTED_FALLBACK,
   SELECTED_TOKEN,
@@ -35,7 +32,6 @@ import {
 export const PANEL_NAME = "subagent-view.panel";
 const PREFS_KEY = "panel";
 const ELAPSED_TICK_MS = 1_000;
-const INDENT = "  ";
 const HINT = "j/k move · enter open · c completed · f fullscreen · esc close";
 
 interface Prefs {
@@ -76,26 +72,6 @@ function safeSync(context: Context, sessionID: string): Promise<void> {
   } catch {
     return Promise.resolve();
   }
-}
-
-/** `› ● explore · model · ⏱ 02:34 · 12.4k tok · $0.04 ⚠` */
-function rowLine(row: SubagentRow, now: number): string {
-  const parts: string[] = [];
-  if (row.model) parts.push(row.model);
-
-  const elapsed = elapsedMs(row, now);
-  if (elapsed !== undefined) parts.push(`⏱ ${formatDuration(elapsed)}`);
-
-  if (row.tokens !== undefined && row.tokens > 0) parts.push(`${formatTokens(row.tokens)} tok`);
-  if (row.cost !== undefined && row.cost > 0) parts.push(formatCost(row.cost));
-
-  const current = row.isCurrent ? CURRENT_GLYPH : " ";
-  const glyph = MARKERS[stateOf(row, now)].glyph;
-  const indent = INDENT.repeat(Math.max(0, row.depth - 1));
-  const meta = parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
-  const pending = row.needsPermission ? ` ${PERMISSION_GLYPH}` : "";
-
-  return `${current} ${glyph} ${indent}${row.label}${meta}${pending}`;
 }
 
 function SubagentPanel(props: {
@@ -214,10 +190,7 @@ function SubagentPanel(props: {
 
   const subdued = () => resolveFg(context, SUBDUED_TOKEN, SUBDUED_FALLBACK);
 
-  const header = () => {
-    const total = counts(rows());
-    return `Subagents  ${total.running} run · ${total.done} done · ${total.failed} err`;
-  };
+  const header = () => headerLine(counts(rows()));
 
   const rowFg = (row: SubagentRow, index: number) => {
     if (index === Math.min(cursor(), lastIndex())) {

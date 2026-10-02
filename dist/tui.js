@@ -106,6 +106,38 @@ import { setProp as _$setProp } from "@opentui/solid";
 import { createElement as _$createElement } from "@opentui/solid";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 
+// src/theme.ts
+var SUBDUED_TOKEN = "text.subdued";
+var SUBDUED_FALLBACK = "#546e7a";
+var WARNING_TOKEN = "text.feedback.warning.default";
+var WARNING_FALLBACK = "#ffcb6b";
+var SELECTED_TOKEN = "text.action.primary.selected";
+var SELECTED_FALLBACK = "#82aaff";
+var MARKERS = {
+  running: { glyph: "\u25CF", token: WARNING_TOKEN, fallback: WARNING_FALLBACK },
+  done: { glyph: "\u2713", token: "text.feedback.success.default", fallback: "#c3e88d" },
+  error: { glyph: "\u2715", token: "text.feedback.error.default", fallback: "#f07178" },
+  interrupted: { glyph: "\u2298", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },
+  unknown: { glyph: "\u25CB", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK }
+};
+var PERMISSION_GLYPH = "\u26A0";
+var CURRENT_GLYPH = "\u203A";
+function colorToHex(value) {
+  if (typeof value === "string") return value;
+  const buffer = value?.buffer;
+  if (!Array.isArray(buffer)) return void 0;
+  const pair = (channel) => Math.max(0, Math.min(255, Math.round(Number(channel) || 0))).toString(16).padStart(2, "0");
+  return `#${pair(buffer[0])}${pair(buffer[1])}${pair(buffer[2])}`;
+}
+function resolveFg(context, tokenPath, fallback) {
+  try {
+    const value = tokenPath.split(".").reduce((acc, key) => acc?.[key], context.theme);
+    return colorToHex(value) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 // src/subagents.ts
 var FINISHED = /* @__PURE__ */ new Set([
   STATE.DONE,
@@ -223,44 +255,29 @@ function counts(rows) {
   }
   return { running, done, failed };
 }
-
-// src/theme.ts
-var SUBDUED_TOKEN = "text.subdued";
-var SUBDUED_FALLBACK = "#546e7a";
-var WARNING_TOKEN = "text.feedback.warning.default";
-var WARNING_FALLBACK = "#ffcb6b";
-var SELECTED_TOKEN = "text.action.primary.selected";
-var SELECTED_FALLBACK = "#82aaff";
-var MARKERS = {
-  running: { glyph: "\u25CF", token: WARNING_TOKEN, fallback: WARNING_FALLBACK },
-  done: { glyph: "\u2713", token: "text.feedback.success.default", fallback: "#c3e88d" },
-  error: { glyph: "\u2715", token: "text.feedback.error.default", fallback: "#f07178" },
-  interrupted: { glyph: "\u2298", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK },
-  unknown: { glyph: "\u25CB", token: SUBDUED_TOKEN, fallback: SUBDUED_FALLBACK }
-};
-var PERMISSION_GLYPH = "\u26A0";
-var CURRENT_GLYPH = "\u203A";
-function colorToHex(value) {
-  if (typeof value === "string") return value;
-  const buffer = value?.buffer;
-  if (!Array.isArray(buffer)) return void 0;
-  const pair = (channel) => Math.max(0, Math.min(255, Math.round(Number(channel) || 0))).toString(16).padStart(2, "0");
-  return `#${pair(buffer[0])}${pair(buffer[1])}${pair(buffer[2])}`;
+var INDENT = "  ";
+function rowLine(row, now) {
+  const parts = [];
+  if (row.model) parts.push(row.model);
+  const elapsed = elapsedMs(row, now);
+  if (elapsed !== void 0) parts.push(`\u23F1 ${formatDuration(elapsed)}`);
+  if (row.tokens !== void 0 && row.tokens > 0) parts.push(`${formatTokens(row.tokens)} tok`);
+  if (row.cost !== void 0 && row.cost > 0) parts.push(formatCost(row.cost));
+  const current = row.isCurrent ? CURRENT_GLYPH : " ";
+  const glyph = MARKERS[stateOf(row, now)].glyph;
+  const indent = INDENT.repeat(Math.max(0, row.depth - 1));
+  const meta = parts.length > 0 ? ` \xB7 ${parts.join(" \xB7 ")}` : "";
+  const pending = row.needsPermission ? ` ${PERMISSION_GLYPH}` : "";
+  return `${current} ${glyph} ${indent}${row.label}${meta}${pending}`;
 }
-function resolveFg(context, tokenPath, fallback) {
-  try {
-    const value = tokenPath.split(".").reduce((acc, key) => acc?.[key], context.theme);
-    return colorToHex(value) ?? fallback;
-  } catch {
-    return fallback;
-  }
+function headerLine(total) {
+  return `Subagents  ${total.running} run \xB7 ${total.done} done \xB7 ${total.failed} err`;
 }
 
 // src/panel.tsx
 var PANEL_NAME = "subagent-view.panel";
 var PREFS_KEY = "panel";
 var ELAPSED_TICK_MS = 1e3;
-var INDENT = "  ";
 function safeList(context) {
   try {
     return context.data.session.list() ?? [];
@@ -293,20 +310,6 @@ function safeSync(context, sessionID) {
   } catch {
     return Promise.resolve();
   }
-}
-function rowLine(row, now) {
-  const parts = [];
-  if (row.model) parts.push(row.model);
-  const elapsed = elapsedMs(row, now);
-  if (elapsed !== void 0) parts.push(`\u23F1 ${formatDuration(elapsed)}`);
-  if (row.tokens !== void 0 && row.tokens > 0) parts.push(`${formatTokens(row.tokens)} tok`);
-  if (row.cost !== void 0 && row.cost > 0) parts.push(formatCost(row.cost));
-  const current = row.isCurrent ? CURRENT_GLYPH : " ";
-  const glyph = MARKERS[stateOf(row, now)].glyph;
-  const indent = INDENT.repeat(Math.max(0, row.depth - 1));
-  const meta = parts.length > 0 ? ` \xB7 ${parts.join(" \xB7 ")}` : "";
-  const pending = row.needsPermission ? ` ${PERMISSION_GLYPH}` : "";
-  return `${current} ${glyph} ${indent}${row.label}${meta}${pending}`;
 }
 function SubagentPanel(props) {
   const {
@@ -397,10 +400,7 @@ function SubagentPanel(props) {
     }]
   }));
   const subdued = () => resolveFg(context, SUBDUED_TOKEN, SUBDUED_FALLBACK);
-  const header = () => {
-    const total = counts(rows());
-    return `Subagents  ${total.running} run \xB7 ${total.done} done \xB7 ${total.failed} err`;
-  };
+  const header = () => headerLine(counts(rows()));
   const rowFg = (row, index) => {
     if (index === Math.min(cursor(), lastIndex())) {
       return resolveFg(context, SELECTED_TOKEN, SELECTED_FALLBACK);
