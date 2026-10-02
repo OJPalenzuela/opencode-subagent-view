@@ -10,6 +10,7 @@
 
 import type { Context, PanelInput } from "@opencode/plugin/tui/context";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
+import { COMMAND_IDS } from "./commands.js";
 import { elapsedMs, formatCost, formatDuration, formatTokens } from "./format.js";
 import { collectSubagents, counts, orderRows, stateOf, visibleRows } from "./subagents.js";
 import type {
@@ -32,7 +33,6 @@ import {
 } from "./theme.js";
 
 export const PANEL_NAME = "subagent-view.panel";
-const PLUGIN_ID = "subagent-view";
 const PREFS_KEY = "panel";
 const ELAPSED_TICK_MS = 1_000;
 const INDENT = "  ";
@@ -166,19 +166,19 @@ function SubagentPanel(props: {
     enabled: () => panel.focused,
     commands: [
       {
-        id: `${PLUGIN_ID}.panel.next`,
+        id: COMMAND_IDS.nextRow,
         title: "Next subagent",
         bind: "j",
         run: guarded(() => move(1)),
       },
       {
-        id: `${PLUGIN_ID}.panel.previous`,
+        id: COMMAND_IDS.previousRow,
         title: "Previous subagent",
         bind: "k",
         run: guarded(() => move(-1)),
       },
       {
-        id: `${PLUGIN_ID}.panel.open`,
+        id: COMMAND_IDS.enterRow,
         title: "Open the selected subagent session",
         bind: "enter",
         run: guarded(() => {
@@ -188,7 +188,7 @@ function SubagentPanel(props: {
         }),
       },
       {
-        id: `${PLUGIN_ID}.panel.completed`,
+        id: COMMAND_IDS.toggleCompleted,
         title: "Toggle completed subagents",
         bind: "c",
         run: guarded(() => {
@@ -198,13 +198,13 @@ function SubagentPanel(props: {
         }),
       },
       {
-        id: `${PLUGIN_ID}.panel.fullscreen`,
+        id: COMMAND_IDS.toggleFullscreen,
         title: "Toggle full screen panel",
         bind: "f",
         run: guarded(() => panel.toggleFullscreen()),
       },
       {
-        id: `${PLUGIN_ID}.panel.close`,
+        id: COMMAND_IDS.closePanel,
         title: "Close the subagents panel",
         bind: "escape",
         run: guarded(() => panel.close()),

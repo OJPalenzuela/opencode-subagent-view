@@ -85,6 +85,17 @@ function buildSummary(session, now, status) {
   };
 }
 
+// src/commands.ts
+var COMMAND_IDS = {
+  openPanel: "subagent-view.panel.open",
+  nextRow: "subagent-view.panel.next",
+  previousRow: "subagent-view.panel.previous",
+  enterRow: "subagent-view.panel.enter",
+  toggleCompleted: "subagent-view.panel.completed",
+  toggleFullscreen: "subagent-view.panel.fullscreen",
+  closePanel: "subagent-view.panel.close"
+};
+
 // src/panel.tsx
 import { effect as _$effect } from "@opentui/solid";
 import { createTextNode as _$createTextNode } from "@opentui/solid";
@@ -247,7 +258,6 @@ function resolveFg(context, tokenPath, fallback) {
 
 // src/panel.tsx
 var PANEL_NAME = "subagent-view.panel";
-var PLUGIN_ID = "subagent-view";
 var PREFS_KEY = "panel";
 var ELAPSED_TICK_MS = 1e3;
 var INDENT = "  ";
@@ -343,17 +353,17 @@ function SubagentPanel(props) {
     priority: 100,
     enabled: () => panel.focused,
     commands: [{
-      id: `${PLUGIN_ID}.panel.next`,
+      id: COMMAND_IDS.nextRow,
       title: "Next subagent",
       bind: "j",
       run: guarded(() => move(1))
     }, {
-      id: `${PLUGIN_ID}.panel.previous`,
+      id: COMMAND_IDS.previousRow,
       title: "Previous subagent",
       bind: "k",
       run: guarded(() => move(-1))
     }, {
-      id: `${PLUGIN_ID}.panel.open`,
+      id: COMMAND_IDS.enterRow,
       title: "Open the selected subagent session",
       bind: "enter",
       run: guarded(() => {
@@ -365,7 +375,7 @@ function SubagentPanel(props) {
         });
       })
     }, {
-      id: `${PLUGIN_ID}.panel.completed`,
+      id: COMMAND_IDS.toggleCompleted,
       title: "Toggle completed subagents",
       bind: "c",
       run: guarded(() => {
@@ -375,12 +385,12 @@ function SubagentPanel(props) {
         });
       })
     }, {
-      id: `${PLUGIN_ID}.panel.fullscreen`,
+      id: COMMAND_IDS.toggleFullscreen,
       title: "Toggle full screen panel",
       bind: "f",
       run: guarded(() => panel.toggleFullscreen())
     }, {
-      id: `${PLUGIN_ID}.panel.close`,
+      id: COMMAND_IDS.closePanel,
       title: "Close the subagents panel",
       bind: "escape",
       run: guarded(() => panel.close())
@@ -463,7 +473,7 @@ function registerPanel(context, tick) {
 }
 
 // src/tui.tsx
-var PLUGIN_ID2 = "subagent-view";
+var PLUGIN_ID = "subagent-view";
 var ELAPSED_TICK_MS2 = 1e3;
 var REFRESH_COALESCE_MS = 200;
 var SLOT_DEFAULT = "session.composer.top";
@@ -550,7 +560,7 @@ function PanelCommand(props) {
   props.context.keymap.layer(() => ({
     mode: "global",
     commands: [{
-      id: `${PLUGIN_ID2}.panel.open`,
+      id: COMMAND_IDS.openPanel,
       title: "Subagents panel",
       slash: {
         name: "subagents"
@@ -564,7 +574,7 @@ function PanelCommand(props) {
   return null;
 }
 var tui_default = Plugin.define({
-  id: PLUGIN_ID2,
+  id: PLUGIN_ID,
   setup(context) {
     const [tick, setTick] = createSignal2(0);
     let lastRefreshAt = 0;

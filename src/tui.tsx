@@ -15,6 +15,7 @@ import type { JSX } from "@opentui/solid";
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { buildSummary } from "./format.js";
 import type { SessionLike, SessionStatus } from "./format.js";
+import { COMMAND_IDS } from "./commands.js";
 import { PANEL_NAME, registerPanel } from "./panel.js";
 import { MARKERS, resolveFg, SUBDUED_FALLBACK, SUBDUED_TOKEN } from "./theme.js";
 
@@ -127,7 +128,7 @@ function PanelCommand(props: { readonly context: Context }) {
     mode: "global",
     commands: [
       {
-        id: `${PLUGIN_ID}.panel.open`,
+        id: COMMAND_IDS.openPanel,
         title: "Subagents panel",
         slash: { name: "subagents" },
         palette: true,
