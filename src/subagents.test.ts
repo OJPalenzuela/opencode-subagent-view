@@ -6,7 +6,9 @@ import {
   headerLine,
   headerSegments,
   orderRows,
+  rowCapacity,
   rowParts,
+  rowWindow,
   stateOf,
   visibleRows,
 } from "./subagents.js";
@@ -414,5 +416,98 @@ describe("footerText", () => {
   it("is the header line, not a second text shape", () => {
     const total = { running: 2, done: 1, failed: 1 };
     expect(footerText(total)).toBe(headerLine(total));
+  });
+});
+describe("rowWindow", () => {
+  it("never scrolls a list that already fits", () => {
+    expect(rowWindow(3, 2, 10)).toEqual({ start: 0, end: 3 });
+    expect(rowWindow(1, 0, 1)).toEqual({ start: 0, end: 1 });
+  });
+
+  it("opens at the top with the cursor on the first row", () => {
+    expect(rowWindow(10, 0, 4)).toEqual({ start: 0, end: 4 });
+  });
+
+  it("puts the last row in view without scrolling past the end", () => {
+    expect(rowWindow(10, 9, 4, 6)).toEqual({ start: 6, end: 10 });
+  });
+
+  it("does not move while the cursor is inside the window", () => {
+    expect(rowWindow(10, 2, 4, 1)).toEqual({ start: 1, end: 5 });
+  });
+
+  it("scrolls the minimum when the cursor steps past the window end", () => {
+    expect(rowWindow(10, 4, 4, 0)).toEqual({ start: 1, end: 5 });
+    expect(rowWindow(10, 7, 4, 0)).toEqual({ start: 4, end: 8 });
+  });
+
+  it("scrolls the minimum when the cursor steps past the window start", () => {
+    expect(rowWindow(10, 0, 4, 3)).toEqual({ start: 0, end: 4 });
+  });
+
+  it("keeps the last window flush with the end of a long list", () => {
+    expect(rowWindow(10, 7, 4, 6)).toEqual({ start: 6, end: 10 });
+  });
+
+  it("shows an empty list as an empty window", () => {
+    expect(rowWindow(0, 0, 4)).toEqual({ start: 0, end: 0 });
+    expect(rowWindow(0, 3, 4, 2)).toEqual({ start: 0, end: 0 });
+  });
+
+  it("clamps a capacity below one to a single row", () => {
+    expect(rowWindow(10, 5, 0)).toEqual({ start: 5, end: 6 });
+    expect(rowWindow(10, 5, -4)).toEqual({ start: 5, end: 6 });
+    expect(rowWindow(10, 3, Number.NaN)).toEqual({ start: 3, end: 4 });
+  });
+
+  it("clamps a cursor outside the list instead of producing a bad index", () => {
+    expect(rowWindow(10, 99, 4, 6)).toEqual({ start: 6, end: 10 });
+    expect(rowWindow(10, -3, 4)).toEqual({ start: 0, end: 4 });
+  });
+
+  it("never reports a window wider than the list or out of range", () => {
+    for (let raw = -2; raw <= 12; raw += 1) {
+      for (const capacity of [0, 1, 3, 4, 40]) {
+        for (const from of [-2, 0, 5, 99]) {
+          const cursor = Math.min(Math.max(0, raw), 9);
+          const { start, end } = rowWindow(10, raw, capacity, from);
+          expect(start).toBeGreaterThanOrEqual(0);
+          expect(end).toBeLessThanOrEqual(10);
+          expect(end - start).toBeLessThanOrEqual(Math.max(1, Math.min(capacity, 10)));
+          expect(cursor).toBeLessThan(end);
+          expect(cursor).toBeGreaterThanOrEqual(start);
+        }
+      }
+    }
+  });
+});
+
+describe("rowCapacity", () => {
+  it("subtracts the chrome lines and divides by the lines per row", () => {
+    expect(rowCapacity(20, 2, 2)).toBe(9);
+    expect(rowCapacity(10, 1, 2)).toBe(8);
+  });
+
+  it("floors an odd height instead of rounding up into an overflow", () => {
+    expect(rowCapacity(11, 2, 2)).toBe(4);
+    expect(rowCapacity(7, 1, 2)).toBe(5);
+  });
+
+  it("keeps at least one row when nothing fits", () => {
+    expect(rowCapacity(3, 2, 2)).toBe(1);
+    expect(rowCapacity(2, 2, 2)).toBe(1);
+    expect(rowCapacity(0, 2, 2)).toBe(1);
+    expect(rowCapacity(-8, 2, 2)).toBe(1);
+  });
+
+  it("never reports NaN for a non-finite height or a bogus row cost", () => {
+    expect(rowCapacity(Number.NaN, 2, 2)).toBe(1);
+    expect(rowCapacity(Number.POSITIVE_INFINITY, 2, 2)).toBe(1);
+    expect(rowCapacity(10, 0, 2)).toBe(8);
+    expect(rowCapacity(10, Number.NaN, 2)).toBe(8);
+  });
+
+  it("ignores a negative chrome count instead of growing the window", () => {
+    expect(rowCapacity(10, 2, -4)).toBe(5);
   });
 });

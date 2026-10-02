@@ -345,6 +345,22 @@ function visibleRows(rows, showCompleted) {
   if (showCompleted) return [...rows];
   return rows.filter((row) => !FINISHED.has(stateOf(row)));
 }
+function rowWindow(total, cursor, capacity, from = 0) {
+  if (total <= 0) return { start: 0, end: 0 };
+  const size = Math.min(Math.max(1, finite(capacity) ?? 0), total);
+  const at = Math.min(Math.max(0, finite(cursor) ?? 0), total - 1);
+  const last = total - size;
+  let start = Math.min(Math.max(0, finite(from) ?? 0), last);
+  if (at < start) start = at;
+  else if (at >= start + size) start = at - size + 1;
+  return { start, end: start + size };
+}
+function rowCapacity(height, linesPerRow, chromeLines) {
+  const perRow = Math.max(1, finite(linesPerRow) ?? 1);
+  const chrome = Math.max(0, finite(chromeLines) ?? 0);
+  const usable = Math.max(0, (finite(height) ?? 0) - chrome);
+  return Math.max(1, Math.floor(usable / perRow));
+}
 function counts(rows) {
   let running = 0;
   let done = 0;
@@ -455,6 +471,7 @@ function registerFooter(context, tick) {
 import { effect as _$effect2 } from "@opentui/solid";
 import { createTextNode as _$createTextNode } from "@opentui/solid";
 import { insertNode as _$insertNode } from "@opentui/solid";
+import { use as _$use } from "@opentui/solid";
 import { insert as _$insert2 } from "@opentui/solid";
 import { createComponent as _$createComponent2 } from "@opentui/solid";
 import { setProp as _$setProp2 } from "@opentui/solid";
@@ -463,6 +480,9 @@ import { createEffect, createMemo as createMemo2, createSignal, For, onCleanup, 
 var PANEL_NAME = "subagent-view.panel";
 var PREFS_KEY = "panel";
 var ELAPSED_TICK_MS = 1e3;
+var ROW_LINES = 2;
+var CHROME_LINES = 0;
+var FALLBACK_ROWS = 10;
 function safeList2(context) {
   try {
     return context.data.session.list() ?? [];
@@ -516,6 +536,7 @@ function SubagentPanel(props) {
   });
   const [cursor, setCursor] = createSignal(0);
   const [now, setNow] = createSignal(Date.now());
+  const [viewport, setViewport] = createSignal();
   createEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), ELAPSED_TICK_MS);
     onCleanup(() => clearInterval(timer));
@@ -544,6 +565,17 @@ function SubagentPanel(props) {
     void safeSync(context, sessionID).then(() => props.tick());
   });
   onCleanup(stopPermission);
+  const capacity = createMemo2(() => {
+    const height = viewport()?.height;
+    return typeof height === "number" && height > 0 ? rowCapacity(height, ROW_LINES, CHROME_LINES) : FALLBACK_ROWS;
+  });
+  let from = 0;
+  const view = createMemo2(() => {
+    const window = rowWindow(rows().length, Math.max(0, cursor()), capacity(), from);
+    from = window.start;
+    return window;
+  });
+  const shown = createMemo2(() => rows().slice(view().start, view().end));
   const lastIndex = () => Math.max(0, rows().length - 1);
   const selected = () => rows()[Math.min(Math.max(0, cursor()), lastIndex())];
   const move = (delta) => setCursor((value) => Math.min(Math.max(0, value + delta), lastIndex()));
@@ -611,9 +643,9 @@ function SubagentPanel(props) {
     return resolveFg(context, marker.token, marker.fallback);
   };
   return (() => {
-    var _el$ = _$createElement2("box"), _el$2 = _$createElement2("box"), _el$3 = _$createElement2("text");
+    var _el$ = _$createElement2("box"), _el$2 = _$createElement2("box"), _el$4 = _$createElement2("text");
     _$insertNode(_el$, _el$2);
-    _$insertNode(_el$, _el$3);
+    _$insertNode(_el$, _el$4);
     _$setProp2(_el$, "flexDirection", "column");
     _$setProp2(_el$2, "flexDirection", "row");
     _$insert2(_el$2, _$createComponent2(For, {
@@ -625,16 +657,16 @@ function SubagentPanel(props) {
           return index() > 0;
         },
         get children() {
-          var _el$5 = _$createElement2("text");
-          _$insertNode(_el$5, _$createTextNode(` \xB7 `));
-          _$effect2((_$p) => _$setProp2(_el$5, "fg", subdued(), _$p));
-          return _el$5;
+          var _el$6 = _$createElement2("text");
+          _$insertNode(_el$6, _$createTextNode(` \xB7 `));
+          _$effect2((_$p) => _$setProp2(_el$6, "fg", subdued(), _$p));
+          return _el$6;
         }
       }), (() => {
-        var _el$7 = _$createElement2("text");
-        _$insert2(_el$7, () => segment.text);
-        _$effect2((_$p) => _$setProp2(_el$7, "fg", headerFg(segment), _$p));
-        return _el$7;
+        var _el$8 = _$createElement2("text");
+        _$insert2(_el$8, () => segment.text);
+        _$effect2((_$p) => _$setProp2(_el$8, "fg", headerFg(segment), _$p));
+        return _el$8;
       })()]
     }));
     _$insert2(_el$, _$createComponent2(Show2, {
@@ -643,44 +675,52 @@ function SubagentPanel(props) {
       },
       get fallback() {
         return (() => {
-          var _el$8 = _$createElement2("text");
-          _$insertNode(_el$8, _$createTextNode(`No subagents in this session`));
-          _$effect2((_$p) => _$setProp2(_el$8, "fg", subdued(), _$p));
-          return _el$8;
+          var _el$9 = _$createElement2("text");
+          _$insertNode(_el$9, _$createTextNode(`No subagents in this session`));
+          _$effect2((_$p) => _$setProp2(_el$9, "fg", subdued(), _$p));
+          return _el$9;
         })();
       },
       get children() {
-        return _$createComponent2(For, {
+        var _el$3 = _$createElement2("box");
+        _$use(setViewport, _el$3);
+        _$setProp2(_el$3, "flexDirection", "column");
+        _$setProp2(_el$3, "flexShrink", 1);
+        _$setProp2(_el$3, "maxHeight", "100%");
+        _$setProp2(_el$3, "overflow", "hidden");
+        _$insert2(_el$3, _$createComponent2(For, {
           get each() {
-            return rows();
+            return shown();
           },
           children: (row, index) => {
             const parts = () => rowParts(row, now());
+            const at = () => view().start + index();
             return (() => {
-              var _el$0 = _$createElement2("box"), _el$1 = _$createElement2("text");
-              _$insertNode(_el$0, _el$1);
-              _$setProp2(_el$0, "flexDirection", "column");
-              _$insert2(_el$1, () => parts().label);
-              _$insert2(_el$0, _$createComponent2(Show2, {
+              var _el$1 = _$createElement2("box"), _el$10 = _$createElement2("text");
+              _$insertNode(_el$1, _el$10);
+              _$setProp2(_el$1, "flexDirection", "column");
+              _$insert2(_el$10, () => parts().label);
+              _$insert2(_el$1, _$createComponent2(Show2, {
                 get when() {
                   return parts().meta !== "";
                 },
                 get children() {
-                  var _el$10 = _$createElement2("text");
-                  _$insert2(_el$10, () => parts().meta);
-                  _$effect2((_$p) => _$setProp2(_el$10, "fg", subdued(), _$p));
-                  return _el$10;
+                  var _el$11 = _$createElement2("text");
+                  _$insert2(_el$11, () => parts().meta);
+                  _$effect2((_$p) => _$setProp2(_el$11, "fg", subdued(), _$p));
+                  return _el$11;
                 }
               }), null);
-              _$effect2((_$p) => _$setProp2(_el$1, "fg", rowFg(row, parts().state, index()), _$p));
-              return _el$0;
+              _$effect2((_$p) => _$setProp2(_el$10, "fg", rowFg(row, parts().state, at()), _$p));
+              return _el$1;
             })();
           }
-        });
+        }));
+        return _el$3;
       }
-    }), _el$3);
-    _$insertNode(_el$3, _$createTextNode(`j/k move \xB7 enter open \xB7 c completed \xB7 f fullscreen \xB7 esc close`));
-    _$effect2((_$p) => _$setProp2(_el$3, "fg", subdued(), _$p));
+    }), _el$4);
+    _$insertNode(_el$4, _$createTextNode(`j/k move \xB7 enter open \xB7 c completed \xB7 f fullscreen \xB7 esc close`));
+    _$effect2((_$p) => _$setProp2(_el$4, "fg", subdued(), _$p));
     return _el$;
   })();
 }

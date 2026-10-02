@@ -192,6 +192,48 @@ export function visibleRows(rows: readonly SubagentRow[], showCompleted: boolean
   return rows.filter((row) => !FINISHED.has(stateOf(row)));
 }
 
+/** Half-open range `[start, end)` of the rows currently shown. */
+export interface RowWindow {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * The slice of rows that fits in `capacity`, keeping the cursor inside it.
+ *
+ * Scroll anchor: the window follows the cursor and moves by the minimum amount
+ * necessary — `from` is where it sat last time, so a `j`/`k` step that stays
+ * inside the window leaves the visible rows untouched and the list only shifts
+ * once the cursor would otherwise leave the panel.
+ *
+ * `total <= 0` is an empty window; a capacity below one still shows one row,
+ * because a panel that fits nothing would hide the cursor it is there to move.
+ */
+export function rowWindow(total: number, cursor: number, capacity: number, from = 0): RowWindow {
+  if (total <= 0) return { start: 0, end: 0 };
+  const size = Math.min(Math.max(1, finite(capacity) ?? 0), total);
+  const at = Math.min(Math.max(0, finite(cursor) ?? 0), total - 1);
+  const last = total - size;
+  let start = Math.min(Math.max(0, finite(from) ?? 0), last);
+  if (at < start) start = at;
+  else if (at >= start + size) start = at - size + 1;
+  return { start, end: start + size };
+}
+
+/**
+ * How many rows fit in `height` lines: the chrome comes off first, then what is
+ * left is divided by the lines one row takes. Both costs are parameters rather
+ * than constants because the panel spends two lines per row only while the row
+ * carries a meta line, and the chrome is whatever this panel happens to draw
+ * around the list. Floors, never below one row.
+ */
+export function rowCapacity(height: number, linesPerRow: number, chromeLines: number): number {
+  const perRow = Math.max(1, finite(linesPerRow) ?? 1);
+  const chrome = Math.max(0, finite(chromeLines) ?? 0);
+  const usable = Math.max(0, (finite(height) ?? 0) - chrome);
+  return Math.max(1, Math.floor(usable / perRow));
+}
+
 export function counts(rows: readonly SubagentRow[]): SubagentCounts {
   let running = 0;
   let done = 0;

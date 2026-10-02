@@ -14,7 +14,16 @@ import { COMMAND_IDS } from "./commands.js";
 import { ensureMessages, rowPercent } from "./context.js";
 import type { ModelInfoLike } from "./context.js";
 import type { State } from "./format.js";
-import { collectSubagents, counts, headerSegments, orderRows, rowParts, visibleRows } from "./subagents.js";
+import {
+  collectSubagents,
+  counts,
+  headerSegments,
+  orderRows,
+  rowCapacity,
+  rowParts,
+  rowWindow,
+  visibleRows,
+} from "./subagents.js";
 import type {
   HeaderSegment,
   PermissionLookup,
@@ -37,6 +46,12 @@ export const PANEL_NAME = "subagent-view.panel";
 const PREFS_KEY = "panel";
 const ELAPSED_TICK_MS = 1_000;
 const HINT = "j/k move · enter open · c completed · f fullscreen · esc close";
+/** Label line plus meta line: a row without a meta line wastes its second. */
+const ROW_LINES = 2;
+/** The scrolling container is a sibling of the header and the hint, not a parent. */
+const CHROME_LINES = 0;
+/** Rows to show before the first layout pass reports a height. */
+const FALLBACK_ROWS = 10;
 
 interface Prefs {
   showCompleted: boolean;
@@ -97,6 +112,7 @@ function SubagentPanel(props: {
   const [prefs, setPrefs] = context.storage.store(PREFS_KEY, { initial: initialPrefs });
   const [cursor, setCursor] = createSignal(0);
   const [now, setNow] = createSignal(Date.now());
+  const [viewport, setViewport] = createSignal<{ height: number }>();
 
   createEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), ELAPSED_TICK_MS);
@@ -153,6 +169,31 @@ function SubagentPanel(props: {
     void safeSync(context, sessionID).then(() => props.tick());
   });
   onCleanup(stopPermission);
+
+  // ponytail: `viewport()` is read while this memo recomputes, which happens on
+  // a data tick, not on a resize: a pure terminal resize with no data event
+  // leaves the window stale until the next tick. Upgrade path: a host resize
+  // signal feeding `tick()`.
+  // A missing ref or a height yoga has not computed yet means "not measured":
+  // show a plausible window instead of one row, and re-read on the next tick.
+  const capacity = createMemo(() => {
+    const height = viewport()?.height;
+    return typeof height === "number" && height > 0
+      ? rowCapacity(height, ROW_LINES, CHROME_LINES)
+      : FALLBACK_ROWS;
+  });
+
+  // `rowWindow` moves the window by the minimum amount from where it already
+  // was, so it needs the previous start. A closure variable, not a signal: the
+  // value is written while the memo recomputes and read on the next one, and a
+  // signal would either loop or lag a render behind.
+  let from = 0;
+  const view = createMemo(() => {
+    const window = rowWindow(rows().length, Math.max(0, cursor()), capacity(), from);
+    from = window.start;
+    return window;
+  });
+  const shown = createMemo(() => rows().slice(view().start, view().end));
 
   const lastIndex = () => Math.max(0, rows().length - 1);
   const selected = () => rows()[Math.min(Math.max(0, cursor()), lastIndex())];
@@ -249,19 +290,32 @@ function SubagentPanel(props: {
         when={rows().length > 0}
         fallback={<text fg={subdued()}>No subagents in this session</text>}
       >
-        <For each={rows()}>
-          {(row, index) => {
-            const parts = () => rowParts(row, now());
-            return (
-              <box flexDirection="column">
-                <text fg={rowFg(row, parts().state, index())}>{parts().label}</text>
-                <Show when={parts().meta !== ""}>
-                  <text fg={subdued()}>{parts().meta}</text>
-                </Show>
-              </box>
-            );
-          }}
-        </For>
+        {/* The only scrolling container: header, fallback and hint stay outside
+            it, and `maxHeight`/`overflow` clip when a measurement is stale. */}
+        <box
+          ref={setViewport}
+          flexDirection="column"
+          flexShrink={1}
+          maxHeight="100%"
+          overflow="hidden"
+        >
+          <For each={shown()}>
+            {(row, index) => {
+              const parts = () => rowParts(row, now());
+              // `shown()` is a slice, so the row's own index is what decides
+              // the highlight, not its position inside the slice.
+              const at = () => view().start + index();
+              return (
+                <box flexDirection="column">
+                  <text fg={rowFg(row, parts().state, at())}>{parts().label}</text>
+                  <Show when={parts().meta !== ""}>
+                    <text fg={subdued()}>{parts().meta}</text>
+                  </Show>
+                </box>
+              );
+            }}
+          </For>
+        </box>
       </Show>
       <text fg={subdued()}>{HINT}</text>
     </box>

@@ -57,6 +57,8 @@ j/k move · enter open · c completed · f fullscreen · esc close
 - `›` marks the session you are currently in.
 - The first rows are the ones that need you: pending permissions, then running,
   then the most recent activity.
+- When there are more subagents than the panel has lines, the list scrolls to
+  keep the selected one visible.
 
 ### Keys
 
