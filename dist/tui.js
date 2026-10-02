@@ -806,6 +806,7 @@ function SubagentGlance(props) {
     onCleanup2(() => clearInterval(timer));
   });
   createEffect2(() => {
+    props.tick();
     const sessionID = props.sessionID;
     ensureSessions(props.context, [sessionID, ...collectSubagents(safeList3(props.context), sessionID).map((row) => row.id)]);
   });

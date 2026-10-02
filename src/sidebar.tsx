@@ -70,8 +70,16 @@ function SubagentGlance(props: {
   // `permission.list()` is a cache read the host only fills for the session you
   // are in, so without this a subagent blocked on a permission would answer
   // "none": neither marked `⚠` nor ranked first on a session where the panel was
-  // never opened. One ask per session per generation, shared with the panel.
+  // never opened.
+  //
+  // `tick()` is read here on purpose, and it is the whole reason this effect is
+  // not one-shot: a subagent spawned after the widget mounted is invisible to a
+  // plain cache read, and the only signal that it exists is the data event its
+  // creation raises — which bumps the shared tick. Re-running on every tick is
+  // cheap because `ensureSessions` skips any id it already synced this
+  // generation, so a repeat costs one `Set` lookup per id.
   createEffect(() => {
+    props.tick();
     const sessionID = props.sessionID;
     ensureSessions(props.context, [
       sessionID,
