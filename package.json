@@ -14,6 +14,7 @@
   ],
   "scripts": {
     "build": "tsup",
+    "prepack": "tsup",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

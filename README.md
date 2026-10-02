@@ -18,6 +18,21 @@ It renders nothing in root sessions, so it stays out of the way everywhere else.
 
 ## Install
 
+### With the OpenCode CLI
+
+```sh
+# from npm
+opencode plugin add opencode-subagent-view
+
+# or directly from the repository
+opencode plugin add github:OJPalenzuela/opencode-subagent-view
+```
+
+`opencode plugin add` installs the package into the global OpenCode config and
+registers it. To pass plugin `options`, use the config-file form below.
+
+### From a local checkout
+
 Build once, then point OpenCode at the repository directory in
 `~/.config/opencode/cli.json`:
 
