@@ -3,11 +3,12 @@
 When you are inside a subagent's session in the OpenCode v2 TUI, the interface
 stops telling you what that subagent is doing — no model, no token usage, no
 clock. This plugin adds one live line above the composer for exactly that case:
-state dot, agent name, model (`provider/id`, with the variant when the session
-picked one), elapsed time, tokens, cost and context-window usage, e.g.
+state dot, the subagent's label — its task, with the agent in parentheses — model
+(`provider/id`, with the variant when the session picked one), elapsed time,
+tokens, cost and context-window usage, e.g.
 
 ```
-● explore · anthropic/claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok · $0.04 · 37% ctx
+● F4 context usage percent (general) · anthropic/claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok · $0.04 · 37% ctx
 ```
 
 It renders nothing in root sessions, so it stays out of the way everywhere else.
@@ -38,13 +39,21 @@ children and grandchildren, one row each:
 
 ```
 Subagents  2 run · 1 done · 0 err
-  ● explore · claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok · 37% ctx
-    ◌ review · gpt-5 · ⏱ 00:12 · 3.1k tok
-› ✓ build · claude-sonnet-4-6 · ⏱ 01:04 · 8.0k tok · $0.04 · 12% ctx
+  ● explore the TODO list · claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok · 37% ctx
+    ◌ review the parser fix (review-validator) · gpt-5 · ⏱ 00:12 · 3.1k tok
+› ✓ build the release · claude-sonnet-4-6 · ⏱ 01:04 · 8.0k tok · $0.04 · 12% ctx
   ● docs · claude-sonnet-4-6 · ⏱ 00:03 · 1.2k tok ⚠
 j/k move · enter open · c completed · f fullscreen · esc close
 ```
 
+- **A row is named by its task, not just its agent.** Subagents of one agent share
+  its name, so the label is the title — what the subagent was actually asked to
+  do — with the agent in parentheses: `F4 context usage percent (general)`. When
+  the title already names the agent it is left alone (`general agent review`, not
+  `general agent review (general)`), and a generic `code` agent is dropped rather
+  than printed. The status line, the panel, the sidebar and the completion alerts
+  all go through that one helper, so no two surfaces can label the same subagent
+  differently.
 - `●` running, `◌` idle, `✓` done, `✕` failed, `⊘` interrupted, `○` unknown —
   same markers as the status line. Idle and unknown rows stay in the panel; only
   done, failed and interrupted are hidden by `c`.
@@ -80,9 +89,9 @@ three subagents that matter most:
 
 ```
 ● 0 run · ✓ 30 done · ✕ 0 err
-  [✓] general · space-bunny-free
+  [✓] F4 context usage percent (general) · space-bunny-free
       ↳ ⏱ 36:34  277,871 tok · 13% ctx
-  [✓] review-validator · space-bunny-free
+  [✓] fix the flaky parser test · space-bunny-free
       ↳ ⏱ 01:22  36,169 tok · 3% ctx
 ```
 
@@ -109,13 +118,14 @@ if you see a difference between them, that is a bug.
 When a subagent of the session you are in finishes, the plugin announces it:
 
 ```
-explore
+F4 context usage percent (general)
 succeeded · ⏱ 02:34 · 12.4k tok · $0.04
 ```
 
-The agent label is the title, the message is the real outcome followed by the
-segments that exist — elapsed time, tokens, cost — with anything missing left
-out. `failed` and `interrupted` read as themselves, so an alert never sounds
+The alert title is the same [label](#subagents-panel) every other surface uses —
+the task, with the agent in parentheses. The message is the real outcome followed
+by the segments that exist — elapsed time, tokens, cost — with anything missing
+left out. `failed` and `interrupted` read as themselves, so an alert never sounds
 like a success.
 
 The `subagent_done` sound and the desktop notification only play while the

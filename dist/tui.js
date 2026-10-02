@@ -82,6 +82,15 @@ function formatModel(model) {
   const qualified = provider && !id.startsWith(`${provider}/`) ? `${provider}/${id}` : id;
   return model?.variant ? `${qualified} (${model.variant})` : qualified;
 }
+var GENERIC_AGENT = "code";
+function rowLabel(session) {
+  const title = session.title?.trim() ?? "";
+  const named = session.agent?.trim() ?? "";
+  const agent = named === GENERIC_AGENT ? "" : named;
+  if (title === "") return agent !== "" ? agent : DEFAULT_LABEL;
+  if (agent === "") return title;
+  return title.toLowerCase().includes(agent.toLowerCase()) ? title : `${title} (${agent})`;
+}
 function buildSummary(session, now, status) {
   const parts = [];
   const model = formatModel(session.model);
@@ -95,7 +104,7 @@ function buildSummary(session, now, status) {
   if (cost !== void 0 && cost > 0) parts.push(formatCost(cost));
   const percent = finite(session.contextPercent);
   if (percent !== void 0) parts.push(`${formatPercent(percent)}% ctx`);
-  const label = session.agent?.trim() || session.title?.trim() || DEFAULT_LABEL;
+  const label = rowLabel(session);
   return {
     state: deriveState(session, status),
     label,
@@ -310,7 +319,7 @@ function tokenTotal(session) {
 function toRow(session, depth, currentSessionID, getStatus, needsPermission) {
   return {
     id: session.id,
-    label: session.agent?.trim() || session.title?.trim() || DEFAULT_LABEL,
+    label: rowLabel(session),
     model: session.model?.id,
     tokens: tokenTotal(session),
     cost: finite(session.cost),

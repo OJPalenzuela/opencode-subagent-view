@@ -7,7 +7,6 @@
  */
 
 import {
-  DEFAULT_LABEL,
   STATE,
   deriveState,
   elapsedMs,
@@ -16,6 +15,7 @@ import {
   formatDuration,
   formatExactTokens,
   formatPercent,
+  rowLabel,
 } from "./format.js";
 import type { Outcome, SessionLike, SessionStatus, SessionTime, State } from "./format.js";
 import { CURRENT_GLYPH, MARKERS, PERMISSION_GLYPH } from "./theme.js";
@@ -113,7 +113,7 @@ function toRow(
 ): SubagentRow {
   return {
     id: session.id,
-    label: session.agent?.trim() || session.title?.trim() || DEFAULT_LABEL,
+    label: rowLabel(session),
     model: session.model?.id,
     tokens: tokenTotal(session),
     cost: finite(session.cost),

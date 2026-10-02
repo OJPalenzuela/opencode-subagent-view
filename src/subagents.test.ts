@@ -183,6 +183,25 @@ describe("collectSubagents row data", () => {
   });
 });
 
+describe("rowLabel through the panel path", () => {
+  it("surfaces the title through collectSubagents, not just in isolation", () => {
+    const rows = collectSubagents(
+      [
+        ses("ses_root", undefined),
+        ses("ses_a", "ses_root", { agent: "general", title: "F4 context usage percent" }),
+        ses("ses_b", "ses_root", { agent: "code", title: "fix the flaky parser test" }),
+        ses("ses_c", "ses_root", { agent: "review-validator" }),
+      ],
+      "ses_root",
+    );
+    expect(rows.map((r) => r.label)).toEqual([
+      "F4 context usage percent (general)",
+      "fix the flaky parser test",
+      "review-validator",
+    ]);
+  });
+});
+
 describe("orderRows", () => {
   it("puts permission-pending first, then running, then the rest", () => {
     const rows = [

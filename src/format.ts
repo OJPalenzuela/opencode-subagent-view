@@ -208,6 +208,45 @@ export function formatModel(model: SessionModel | undefined): string | undefined
   return model?.variant ? `${qualified} (${model.variant})` : qualified;
 }
 
+/** The one record a label is made of: the task title and the agent name. */
+export interface RowLabelLike {
+  readonly agent?: string;
+  readonly title?: string;
+}
+
+/** An agent name that names no kind of subagent, so it is noise in a label. */
+const GENERIC_AGENT = "code";
+
+/**
+ * What a subagent is called, for every surface that shows one: the task it was
+ * given, plus the agent that ran it.
+ *
+ * Subagents of one agent share its name, so the agent alone cannot tell two of
+ * them apart and the title — the only thing that can — is what distinguishes a
+ * row from its sibling. Precedence:
+ *
+ * - `title (agent)` when both exist and the title does not already name the
+ *   agent. Containment is a plain case-insensitive substring, so "rerun" does
+ *   not count as naming `general` while "generalization" does.
+ * - The title alone when it already names the agent, or when there is no usable
+ *   agent — which includes the literal `code`, the generic name that
+ *   distinguishes nothing.
+ * - The agent alone when there is no title, and `DEFAULT_LABEL` when neither
+ *   survives.
+ *
+ * Lives here, not next to the panel selectors, so the status line and the panel
+ * rows can share it without one importing the other.
+ */
+export function rowLabel(session: RowLabelLike): string {
+  const title = session.title?.trim() ?? "";
+  const named = session.agent?.trim() ?? "";
+  const agent = named === GENERIC_AGENT ? "" : named;
+
+  if (title === "") return agent !== "" ? agent : DEFAULT_LABEL;
+  if (agent === "") return title;
+  return title.toLowerCase().includes(agent.toLowerCase()) ? title : `${title} (${agent})`;
+}
+
 /** Build the label, the ordered segments and the joined one-line text. */
 export function buildSummary(
   session: SessionLike,
@@ -236,7 +275,7 @@ export function buildSummary(
   const percent = finite(session.contextPercent);
   if (percent !== undefined) parts.push(`${formatPercent(percent)}% ctx`);
 
-  const label = session.agent?.trim() || session.title?.trim() || DEFAULT_LABEL;
+  const label = rowLabel(session);
 
   return {
     state: deriveState(session, status),

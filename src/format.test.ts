@@ -6,6 +6,7 @@ import {
   formatExactTokens,
   formatPercent,
   formatTokens,
+  rowLabel,
 } from "./format.js";
 import type { SessionLike, SessionModel } from "./format.js";
 
@@ -170,9 +171,81 @@ describe("buildSummary state", () => {
   });
 });
 
+describe("rowLabel", () => {
+  it("uses the title alone when there is no agent", () => {
+    expect(rowLabel({ title: "Find TODOs" })).toBe("Find TODOs");
+  });
+
+  it("uses the agent alone when there is no title", () => {
+    expect(rowLabel({ agent: "review-validator" })).toBe("review-validator");
+  });
+
+  it("appends the agent in parentheses when the title does not name it", () => {
+    expect(rowLabel({ title: "F4 context usage percent", agent: "general" })).toBe(
+      "F4 context usage percent (general)",
+    );
+  });
+
+  it("leaves the title alone when it already mentions the agent", () => {
+    expect(rowLabel({ title: "general agent review", agent: "general" })).toBe("general agent review");
+    expect(rowLabel({ title: "Review by GENERAL", agent: "general" })).toBe("Review by GENERAL");
+    expect(rowLabel({ title: "Run the General", agent: "GENERAL" })).toBe("Run the General");
+  });
+
+  it("treats a containment inside a longer word as the agent already being named", () => {
+    expect(rowLabel({ title: "generalization of the parser", agent: "general" })).toBe(
+      "generalization of the parser",
+    );
+  });
+
+  it("does not treat a partial word as naming the agent", () => {
+    expect(rowLabel({ title: "rerun", agent: "general" })).toBe("rerun (general)");
+  });
+
+  it("drops the literal `code` agent, so the title wins bare", () => {
+    expect(rowLabel({ title: "fix the flaky parser test", agent: "code" })).toBe(
+      "fix the flaky parser test",
+    );
+  });
+
+  it("falls back to the default label for `code` alone", () => {
+    expect(rowLabel({ agent: "code" })).toBe("subagent");
+  });
+
+  it("trims both sides", () => {
+    expect(rowLabel({ title: "  spaced title  ", agent: "  general  " })).toBe("spaced title (general)");
+  });
+
+  it("ignores empty and whitespace-only strings on either side", () => {
+    expect(rowLabel({ title: "", agent: "" })).toBe("subagent");
+    expect(rowLabel({ title: "   ", agent: "   " })).toBe("subagent");
+    expect(rowLabel({ title: "   ", agent: "general" })).toBe("general");
+    expect(rowLabel({ title: "  Find TODOs  ", agent: "   " })).toBe("Find TODOs");
+    expect(rowLabel({ title: "Find TODOs", agent: "   " })).toBe("Find TODOs");
+  });
+
+  it("falls back to the default label when the record has neither", () => {
+    expect(rowLabel({})).toBe("subagent");
+  });
+});
+
 describe("buildSummary label", () => {
-  it("prefers agent, then title, then a constant fallback", () => {
-    expect(buildSummary(session({ agent: "explore", title: "Find TODOs" }), T0).label).toBe("explore");
+  it("labels a subagent by its task, exactly as the panel rows do", () => {
+    expect(buildSummary(session({ agent: "general", title: "F4 context usage percent" }), T0).label).toBe(
+      "F4 context usage percent (general)",
+    );
+    expect(buildSummary(session({ agent: "code", title: "fix the flaky parser test" }), T0).label).toBe(
+      "fix the flaky parser test",
+    );
+    expect(buildSummary(session({ agent: "general", title: "general agent review" }), T0).label).toBe(
+      "general agent review",
+    );
+    expect(buildSummary(session({ agent: "review-validator", title: undefined }), T0).label).toBe(
+      "review-validator",
+    );
+  });
+
+  it("keeps the title, then the default label, when there is no usable agent", () => {
     expect(buildSummary(session({ agent: undefined, title: "Find TODOs" }), T0).label).toBe("Find TODOs");
     expect(buildSummary(session({ agent: undefined, title: undefined }), T0).label).toBe("subagent");
     expect(buildSummary(session({ agent: "  ", title: "Find TODOs" }), T0).label).toBe("Find TODOs");
