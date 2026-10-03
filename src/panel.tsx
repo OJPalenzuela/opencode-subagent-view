@@ -14,10 +14,12 @@ import { COMMAND_IDS } from "./commands.js";
 import { ensureMessages, ensureSessions, rowPercent } from "./context.js";
 import type { ModelInfoLike } from "./context.js";
 import type { State } from "./format.js";
+import { finite } from "./format.js";
 import {
   collectSubagents,
   counts,
   headerSegments,
+  LABEL_COLUMN,
   orderRows,
   rowCapacity,
   rowParts,
@@ -310,13 +312,23 @@ function SubagentPanel(props: {
         >
           <For each={shown()}>
             {(row, index) => {
-              const parts = () => rowParts(row, now());
+              const parts = () => rowParts(row, now(), sized);
               // `shown()` is a slice, so the row's own index is what decides
               // the highlight, not its position inside the slice.
               const at = () => view().start + index();
+              const fg = () => rowFg(row, parts().state, at());
+              // The panel publishes its own width, so it wraps to what it really
+              // has instead of the sidebar's constant. A missing, zero or
+              // nonsensical measurement omits the option and takes the default.
+              const measured = finite(panel.width);
+              const available = measured === undefined ? undefined : measured - LABEL_COLUMN;
+              const sized = available !== undefined && available > 0 ? { labelWidth: available } : undefined;
               return (
                 <box flexDirection="column">
-                  <text fg={rowFg(row, parts().state, at())}>{parts().label}</text>
+                  {/* One node per wrapped label line, all in the row's color. */}
+                  <For each={parts().label}>
+                    {(line) => <text fg={fg()}>{line}</text>}
+                  </For>
                   <Show when={parts().meta !== ""}>
                     <text fg={subdued()}>{parts().meta}</text>
                   </Show>

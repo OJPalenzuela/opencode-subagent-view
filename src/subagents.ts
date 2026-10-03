@@ -275,10 +275,77 @@ export function counts(rows: readonly SubagentRow[]): SubagentCounts {
 const INDENT = "  ";
 const SEPARATOR = " · ";
 /**
- * Columns the label starts at — `› ` plus `[x] ` — so the meta line lands
- * directly under the label of the same row.
+ * Label columns available to the wrapped text: the sidebar row is 34 columns
+ * wide and the marker, its brackets and the gap take 5. A constant, not an
+ * option, because the `sidebar.content` slot publishes no width to measure.
  */
-const LABEL_COLUMN = 6;
+export const LABEL_WIDTH = 29;
+/** Continuation lines line up under the label, not under the marker. */
+export const LABEL_INDENT = "    ";
+/** A label gets one continuation line, as the reference sidebar does. */
+const LABEL_LABEL_LINES = 2;
+
+/** Columns, counted in code points so a cut never lands mid-character. */
+function columns(chars: readonly string[]): number {
+  return chars.length;
+}
+
+/**
+ * A label as at most `maxLines` lines, each at most `width` columns, every line
+ * after the first prefixed with `indent`.
+ *
+ * Whitespace runs collapse and the ends are trimmed first, so the width is spent
+ * on content. Greedy: while the remainder still overflows and there is room for
+ * another line, it is cut at the last space that fits — never mid-word, so a
+ * single word longer than the width becomes its own line. Whatever is left for
+ * the final line is ellipsized if it still overflows, which is also how content
+ * past `maxLines` is dropped.
+ *
+ * A non-positive `width` or fewer than two lines cannot be wrapped at all, so
+ * both return the text on one line, intact.
+ *
+ * ponytail: columns are code points, not terminal cells, so wide CJK and emoji
+ * are under-counted and such a label can overflow its line. Upgrade path: a
+ * per-character width table (`characterWidth`) the way the reference plugin
+ * counts, called from `columns`.
+ */
+export function wrapLabel(
+  value: string,
+  width: number,
+  maxLines: number,
+  indent: string,
+): string[] {
+  const chars = Array.from(value.replace(/\s+/g, " ").trim());
+  if (chars.length === 0) return [""];
+  if (!(width >= 1) || !(maxLines >= 2)) return [chars.join("")];
+
+  const lines: string[] = [];
+  let rest = chars;
+  while (columns(rest) > width && lines.length < maxLines - 1) {
+    // The last space strictly inside the width; the text is trimmed, so index 0
+    // is never a space and this always makes progress.
+    let cut = 0;
+    for (let index = width - 1; index > 0; index -= 1) {
+      if (rest[index] === " ") {
+        cut = index;
+        break;
+      }
+    }
+    // No space to cut at: keep the whole word rather than splitting it.
+    if (cut === 0) break;
+    lines.push(rest.slice(0, cut).join(""));
+    rest = rest.slice(cut + 1);
+  }
+
+  const last = rest.length > width ? `${rest.slice(0, width - 1).join("")}…` : rest.join("");
+  return [...lines, last].map((line, index) => (index === 0 ? line : `${indent}${line}`));
+}
+/**
+ * Columns the label starts at — `› ` plus `[x] ` — so the meta line lands
+ * directly under the label of the same row. Also what a caller must subtract from
+ * its own width to know how many columns the label text itself may use.
+ */
+export const LABEL_COLUMN = 6;
 
 /**
  * A row as two lines instead of one string: the panel needs separate nodes to
@@ -289,19 +356,28 @@ const LABEL_COLUMN = 6;
  */
 export interface RowParts {
   readonly state: State;
-  readonly label: string;
+  /** One entry per line: the marker line, then one per wrapped continuation. */
+  readonly label: readonly string[];
   /** `""` when the row has no metric at all, so the panel prints one line. */
   readonly meta: string;
 }
 
 /**
- * The one knob a caller has on a row. The panel and the sidebar render the same
- * row, and the only difference between them is room: the sidebar has three lines,
- * so it asks for the row without its cost segment.
+ * The knobs a caller has on a row. The panel and the sidebar render the same row,
+ * and every difference between them is room: the sidebar is narrow and shows
+ * three lines, so it wraps tighter and asks for the row without its cost or
+ * model; the panel knows its own width and passes it in.
+ *
+ * Both fields default to today's behaviour, so a caller that says nothing gets
+ * the row exactly as it was.
  */
 export interface RowPartsOptions {
   /** Render the cost segment. Default `true`. */
   readonly cost?: boolean;
+  /** Render the model on the label line. Default `true`. */
+  readonly model?: boolean;
+  /** Columns the label may use before it wraps. Default `LABEL_WIDTH`. */
+  readonly labelWidth?: number;
 }
 
 /** One header count plus the token that colors it. */
@@ -317,19 +393,33 @@ function headerSegment(noun: string, state: State, count: number): HeaderSegment
 }
 
 /**
- * The row's two lines: a state-colored `› [✓] explore · model` label line, and a
- * subdued `↳ ⏱ 02:34  19,212 tok · $0.04 · 37% ctx` metrics line indented under
- * the label. The permission marker stays on the label line: it is a state
- * signal, not a metric.
+ * The row's label lines — a state-colored `› [✓] explore · model`, wrapped to
+ * `LABEL_WIDTH` with continuations indented — and a subdued
+ * `↳ ⏱ 02:34  19,212 tok · $0.04 · 37% ctx` metrics line indented under the
+ * label. The permission marker stays on the label: it is a state signal, not a
+ * metric, and it rides at the end of the **last** label line so it cannot be
+ * pushed off the row by a wrap.
  */
 export function rowParts(row: SubagentRow, now: number, options?: RowPartsOptions): RowParts {
   const state = stateOf(row, now);
   const depth = Math.max(0, row.depth - 1);
 
   const current = row.isCurrent ? CURRENT_GLYPH : " ";
-  const label = row.model ? `${row.label}${SEPARATOR}${row.model}` : row.label;
+  // `model: false` drops the model segment and nothing else: a narrow row that
+  // wraps still names the subagent, it just cannot also name its model.
+  const label = row.model && options?.model !== false
+    ? `${row.label}${SEPARATOR}${row.model}`
+    : row.label;
   const pending = row.needsPermission ? ` ${PERMISSION_GLYPH}` : "";
-  const labelLine = `${current} ${MARKERS[state].bracketed} ${INDENT.repeat(depth)}${label}${pending}`;
+  const marker = `${current} ${MARKERS[state].bracketed} ${INDENT.repeat(depth)}`;
+  // `??` keeps an explicit width, including a nonsensical one: `wrapLabel` already
+  // degrades a non-positive width to one unwrapped line rather than throwing, and
+  // re-deciding the default here would hide that from its own tests.
+  const wrapped = wrapLabel(label, options?.labelWidth ?? LABEL_WIDTH, LABEL_LABEL_LINES, LABEL_INDENT);
+  const last = wrapped.length - 1;
+  const labelLines = wrapped.map((line, index) =>
+    `${index === 0 ? marker : ""}${line}${index === last ? pending : ""}`,
+  );
 
   const elapsed = elapsedMs(row, now);
   // `finite` first: `NaN <= 0` and `Infinity > 0` are both true/false in ways
@@ -358,7 +448,7 @@ export function rowParts(row: SubagentRow, now: number, options?: RowPartsOption
     ? ""
     : `${" ".repeat(LABEL_COLUMN + INDENT.length * depth)}↳ ${segments.join(SEPARATOR)}`;
 
-  return { state, label: labelLine, meta: metaLine };
+  return { state, label: labelLines, meta: metaLine };
 }
 
 /** Header counts as three separately colored segments: `● 2 run`, `✓ 1 done`, `✕ 0 err`. */

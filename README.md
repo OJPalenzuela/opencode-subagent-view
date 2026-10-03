@@ -39,12 +39,21 @@ children and grandchildren, one row each:
 
 ```
 Subagents  2 run · 1 done · 0 err
-  ● explore the TODO list · claude-sonnet-4-6 · ⏱ 02:34 · 12.4k tok · 37% ctx
-    ◌ review the parser fix (review-validator) · gpt-5 · ⏱ 00:12 · 3.1k tok
-› ✓ build the release · claude-sonnet-4-6 · ⏱ 01:04 · 8.0k tok · $0.04 · 12% ctx
+  ● RDD review lens retry
+    (review-reliability)
+      ↳ ⏱ 05:05  1,564 tok · 37% ctx
+    ◌ review the parser fix (review-validator)
+      ↳ ⏱ 00:12 · 3.1k tok
+› ✓ build the release · claude-sonnet-4-6
+      ↳ ⏱ 01:04  8.0k tok · $0.04 · 12% ctx
   ● docs · claude-sonnet-4-6 · ⏱ 00:03 · 1.2k tok ⚠
 j/k move · enter open · c completed · f fullscreen · esc close
 ```
+
+A label wraps onto at most two lines, each continuation indented by four spaces,
+so a long `title (agent)` never truncates on one line. `⚠` rides at the end of
+the last label line. The panel wraps to its own measured width; the sidebar
+wraps at 29 columns, which is the fixed width the `sidebar.content` slot assumes.
 
 - **A row is named by its task, not just its agent.** Subagents of one agent share
   its name, so the label is the title — what the subagent was actually asked to
@@ -88,18 +97,21 @@ Under the sidebar's own sections the plugin shows the counts header and then the
 three subagents that matter most:
 
 ```
-● 0 run · ✓ 30 done · ✕ 0 err
-  [✓] F4 context usage percent (general) · space-bunny-free
-      ↳ ⏱ 36:34  277,871 tok · 13% ctx
-  [✓] fix the flaky parser test · space-bunny-free
+● 0 run · ✓ 32 done · ✕ 0 err
+  [✓] RDD review lens retry
+    (review-reliability)
+      ↳ ⏱ 05:05  1,564 tok
+  [✓] fix the flaky parser test
       ↳ ⏱ 01:22  36,169 tok · 3% ctx
 ```
 
-That is the [panel's](#subagents-panel) own row format — same header, same
-two-line row, same markers, same colors, same ordering — capped at three rows
-instead of a scrollable list, and **without the cost segment** on the row. The
-sidebar and the panel render through the same code, so they cannot drift apart;
-if you see a difference between them, that is a bug.
+That is the [panel's](#subagents-panel) own row format — same header, same row,
+same markers, same colors, same ordering, same 29-column two-line label wrap —
+capped at three rows instead of a scrollable list, and **without the cost segment
+or the model** on the row — the sidebar's two label lines go to the task, and the
+model is the panel's to show. The sidebar and the panel render through the same
+code, so they cannot drift apart; if you see a difference between them, that is a
+bug.
 
 - **Three rows, never more.** The sidebar has no room to scroll, so this is a
   glance; `/subagents` is the detailed view, with every subagent and their costs.

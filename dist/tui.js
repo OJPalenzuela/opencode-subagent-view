@@ -3,7 +3,7 @@ import { createComponent as _$createComponent4 } from "@opentui/solid";
 import { effect as _$effect4 } from "@opentui/solid";
 import { memo as _$memo } from "@opentui/solid";
 import { createTextNode as _$createTextNode2 } from "@opentui/solid";
-import { insertNode as _$insertNode3 } from "@opentui/solid";
+import { insertNode as _$insertNode2 } from "@opentui/solid";
 import { insert as _$insert4 } from "@opentui/solid";
 import { setProp as _$setProp4 } from "@opentui/solid";
 import { createElement as _$createElement4 } from "@opentui/solid";
@@ -418,6 +418,33 @@ function counts(rows) {
 }
 var INDENT = "  ";
 var SEPARATOR3 = " \xB7 ";
+var LABEL_WIDTH = 29;
+var LABEL_INDENT = "    ";
+var LABEL_LABEL_LINES = 2;
+function columns(chars) {
+  return chars.length;
+}
+function wrapLabel(value, width, maxLines, indent) {
+  const chars = Array.from(value.replace(/\s+/g, " ").trim());
+  if (chars.length === 0) return [""];
+  if (!(width >= 1) || !(maxLines >= 2)) return [chars.join("")];
+  const lines = [];
+  let rest = chars;
+  while (columns(rest) > width && lines.length < maxLines - 1) {
+    let cut = 0;
+    for (let index = width - 1; index > 0; index -= 1) {
+      if (rest[index] === " ") {
+        cut = index;
+        break;
+      }
+    }
+    if (cut === 0) break;
+    lines.push(rest.slice(0, cut).join(""));
+    rest = rest.slice(cut + 1);
+  }
+  const last = rest.length > width ? `${rest.slice(0, width - 1).join("")}\u2026` : rest.join("");
+  return [...lines, last].map((line, index) => index === 0 ? line : `${indent}${line}`);
+}
 var LABEL_COLUMN = 6;
 function headerSegment(noun, state, count) {
   const marker = MARKERS[state];
@@ -427,9 +454,14 @@ function rowParts(row, now, options) {
   const state = stateOf(row, now);
   const depth = Math.max(0, row.depth - 1);
   const current = row.isCurrent ? CURRENT_GLYPH : " ";
-  const label = row.model ? `${row.label}${SEPARATOR3}${row.model}` : row.label;
+  const label = row.model && options?.model !== false ? `${row.label}${SEPARATOR3}${row.model}` : row.label;
   const pending = row.needsPermission ? ` ${PERMISSION_GLYPH}` : "";
-  const labelLine = `${current} ${MARKERS[state].bracketed} ${INDENT.repeat(depth)}${label}${pending}`;
+  const marker = `${current} ${MARKERS[state].bracketed} ${INDENT.repeat(depth)}`;
+  const wrapped = wrapLabel(label, options?.labelWidth ?? LABEL_WIDTH, LABEL_LABEL_LINES, LABEL_INDENT);
+  const last = wrapped.length - 1;
+  const labelLines = wrapped.map(
+    (line, index) => `${index === 0 ? marker : ""}${line}${index === last ? pending : ""}`
+  );
   const elapsed = elapsedMs(row, now);
   const tokenCount = finite(row.tokens);
   const head = [
@@ -442,7 +474,7 @@ function rowParts(row, now, options) {
   if (percent !== void 0) rest.push(`${formatPercent(percent)}% ctx`);
   const segments = head === "" ? rest : [head, ...rest];
   const metaLine = segments.length === 0 ? "" : `${" ".repeat(LABEL_COLUMN + INDENT.length * depth)}\u21B3 ${segments.join(SEPARATOR3)}`;
-  return { state, label: labelLine, meta: metaLine };
+  return { state, label: labelLines, meta: metaLine };
 }
 function headerSegments(total) {
   return [
@@ -734,25 +766,39 @@ function SubagentPanel(props) {
             return shown();
           },
           children: (row, index) => {
-            const parts = () => rowParts(row, now());
+            const parts = () => rowParts(row, now(), sized);
             const at = () => view().start + index();
+            const fg = () => rowFg(row, parts().state, at());
+            const measured = finite(panel.width);
+            const available = measured === void 0 ? void 0 : measured - LABEL_COLUMN;
+            const sized = available !== void 0 && available > 0 ? {
+              labelWidth: available
+            } : void 0;
             return (() => {
-              var _el$1 = _$createElement2("box"), _el$10 = _$createElement2("text");
-              _$insertNode(_el$1, _el$10);
+              var _el$1 = _$createElement2("box");
               _$setProp2(_el$1, "flexDirection", "column");
-              _$insert2(_el$10, () => parts().label);
+              _$insert2(_el$1, _$createComponent2(For, {
+                get each() {
+                  return parts().label;
+                },
+                children: (line) => (() => {
+                  var _el$11 = _$createElement2("text");
+                  _$insert2(_el$11, line);
+                  _$effect2((_$p) => _$setProp2(_el$11, "fg", fg(), _$p));
+                  return _el$11;
+                })()
+              }), null);
               _$insert2(_el$1, _$createComponent2(Show2, {
                 get when() {
                   return parts().meta !== "";
                 },
                 get children() {
-                  var _el$11 = _$createElement2("text");
-                  _$insert2(_el$11, () => parts().meta);
-                  _$effect2((_$p) => _$setProp2(_el$11, "fg", subdued(), _$p));
-                  return _el$11;
+                  var _el$10 = _$createElement2("text");
+                  _$insert2(_el$10, () => parts().meta);
+                  _$effect2((_$p) => _$setProp2(_el$10, "fg", subdued(), _$p));
+                  return _el$10;
                 }
               }), null);
-              _$effect2((_$p) => _$setProp2(_el$10, "fg", rowFg(row, parts().state, at()), _$p));
               return _el$1;
             })();
           }
@@ -784,7 +830,6 @@ function registerPanel(context, tick) {
 }
 
 // src/sidebar.tsx
-import { insertNode as _$insertNode2 } from "@opentui/solid";
 import { effect as _$effect3 } from "@opentui/solid";
 import { insert as _$insert3 } from "@opentui/solid";
 import { createComponent as _$createComponent3 } from "@opentui/solid";
@@ -890,25 +935,34 @@ function SubagentGlance(props) {
         },
         children: (row) => {
           const parts = () => rowParts(row, now(), {
-            cost: false
+            cost: false,
+            model: false
           });
           return (() => {
-            var _el$2 = _$createElement3("box"), _el$3 = _$createElement3("text");
-            _$insertNode2(_el$2, _el$3);
+            var _el$2 = _$createElement3("box");
             _$setProp3(_el$2, "flexDirection", "column");
-            _$insert3(_el$3, () => parts().label);
+            _$insert3(_el$2, _$createComponent3(For2, {
+              get each() {
+                return parts().label;
+              },
+              children: (line) => (() => {
+                var _el$4 = _$createElement3("text");
+                _$insert3(_el$4, line);
+                _$effect3((_$p) => _$setProp3(_el$4, "fg", fg(row), _$p));
+                return _el$4;
+              })()
+            }), null);
             _$insert3(_el$2, _$createComponent3(Show3, {
               get when() {
                 return parts().meta !== "";
               },
               get children() {
-                var _el$4 = _$createElement3("text");
-                _$insert3(_el$4, () => parts().meta);
-                _$effect3((_$p) => _$setProp3(_el$4, "fg", subdued(), _$p));
-                return _el$4;
+                var _el$3 = _$createElement3("text");
+                _$insert3(_el$3, () => parts().meta);
+                _$effect3((_$p) => _$setProp3(_el$3, "fg", subdued(), _$p));
+                return _el$3;
               }
             }), null);
-            _$effect3((_$p) => _$setProp3(_el$3, "fg", fg(row), _$p));
             return _el$2;
           })();
         }
@@ -1035,12 +1089,12 @@ function SubagentStatus(props) {
     },
     get children() {
       var _el$ = _$createElement4("box"), _el$2 = _$createElement4("text"), _el$3 = _$createElement4("text"), _el$4 = _$createTextNode2(` `), _el$5 = _$createElement4("text");
-      _$insertNode3(_el$, _el$2);
-      _$insertNode3(_el$, _el$3);
-      _$insertNode3(_el$, _el$5);
+      _$insertNode2(_el$, _el$2);
+      _$insertNode2(_el$, _el$3);
+      _$insertNode2(_el$, _el$5);
       _$setProp4(_el$, "flexDirection", "row");
       _$insert4(_el$2, () => marker().glyph);
-      _$insertNode3(_el$3, _el$4);
+      _$insertNode2(_el$3, _el$4);
       _$insert4(_el$3, () => summary().label, null);
       _$insert4(_el$5, (() => {
         var _c$ = _$memo(() => !!summary().text);

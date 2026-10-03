@@ -13,6 +13,7 @@ import {
   stateOf,
   topRows,
   visibleRows,
+  wrapLabel,
 } from "./subagents.js";
 import type { SubagentRow, SubagentSession } from "./subagents.js";
 import type { State } from "./format.js";
@@ -332,6 +333,77 @@ describe("stateOf", () => {
   });
 });
 
+describe("wrapLabel", () => {
+  const W = 29;
+  const I = "    ";
+
+  it("leaves a label that fits on one line, with no indent", () => {
+    expect(wrapLabel("F4 usage", W, 2, I)).toEqual(["F4 usage"]);
+  });
+
+  it("wraps at the last space that fits the width", () => {
+    expect(wrapLabel("F4 context usage percent (general)", W, 2, I)).toEqual([
+      "F4 context usage percent",
+      `${I}(general)`,
+    ]);
+  });
+
+  it("ellipsizes a single word longer than the width instead of hard-cutting it", () => {
+    const [line] = wrapLabel("supercalifragilisticexpialidocious", W, 2, I);
+    // A whole word on one line, ellipsized to fit the width exactly.
+    expect(Array.from(line ?? "").length).toBe(W);
+    expect(line?.endsWith("…")).toBe(true);
+    expect(line).toBe("supercalifragilisticexpialid…");
+  });
+
+  it("ellipsizes the last allowed line when there is more content than maxLines", () => {
+    // Nine words, two lines allowed: the first stops at the last space that fits
+    // 29 columns, and everything left for the second is ellipsized to fit.
+    const lines = wrapLabel("alpha bravo charlie delta echo foxtrot golf hotel india", W, 2, I);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toBe("alpha bravo charlie delta");
+    // `echo foxtrot golf hotel india` is 28 columns: the remainder happens to fit,
+    // so nothing is dropped and the text is simply cut at the maxLines boundary.
+    expect(lines[1]).toBe(`${I}echo foxtrot golf hotel india`);
+  });
+
+  it("ellipsizes when the remainder does not fit the width either", () => {
+    const lines = wrapLabel("alpha bravo charlie delta echoing extraordinarily long words here", W, 2, I);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]?.endsWith("…")).toBe(true);
+    expect(Array.from(lines[1]?.slice(I.length) ?? "").length).toBe(W);
+  });
+
+  it("collapses runs of whitespace and trims the ends", () => {
+    expect(wrapLabel("  alpha \t\n bravo   charlie  ", W, 1, I)).toEqual(["alpha bravo charlie"]);
+    expect(wrapLabel("   ", W, 2, I)).toEqual([""]);
+    expect(wrapLabel("", W, 2, I)).toEqual([""]);
+  });
+
+  it("indents every continuation line and only those", () => {
+    const lines = wrapLabel("RDD review lens retry (review-reliability)", W, 2, I);
+    expect(lines).toEqual(["RDD review lens retry", `${I}(review-reliability)`]);
+    expect(lines[0]?.startsWith(I)).toBe(false);
+  });
+
+  it("degrades without throwing on a non-positive width or fewer than two lines", () => {
+    expect(() => wrapLabel("alpha bravo", 0, 2, I)).not.toThrow();
+    expect(() => wrapLabel("alpha bravo", -5, 2, I)).not.toThrow();
+    expect(() => wrapLabel("alpha bravo", W, 1, I)).not.toThrow();
+    expect(() => wrapLabel("alpha bravo", W, 0, I)).not.toThrow();
+    expect(() => wrapLabel("alpha bravo", Number.NaN, Number.NaN, I)).not.toThrow();
+    // No width, or no room for a continuation: one line, text intact.
+    expect(wrapLabel("alpha bravo", 0, 2, I)).toEqual(["alpha bravo"]);
+    expect(wrapLabel("alpha bravo", W, 1, I)).toEqual(["alpha bravo"]);
+  });
+
+  it("counts code points, so a multi-byte label is not cut mid-character", () => {
+    const lines = wrapLabel("héllo wörld this is a fairly long label", W, 2, I);
+    expect(lines.join("")).toContain("héllo");
+    expect(lines.every((line) => !line.includes("�"))).toBe(true);
+  });
+});
+
 describe("rowParts", () => {
   it("splits the row into a state-colored label line and a subdued meta line", () => {
     const parts = rowParts(
@@ -347,7 +419,7 @@ describe("rowParts", () => {
       T0 + 154_000,
     );
     expect(parts.state).toBe("done");
-    expect(parts.label).toBe("  [✓] explore · claude-sonnet-4-6");
+    expect(parts.label).toEqual(["  [✓] explore · claude-sonnet-4-6"]);
     expect(parts.meta).toBe("      ↳ ⏱ 02:34  19,212 tok · $0.04 · 37% ctx");
   });
 
@@ -363,7 +435,7 @@ describe("rowParts", () => {
     for (const [overrides, state, marker] of cases) {
       const parts = rowParts(row(overrides), T0);
       expect(parts.state).toBe(state);
-      expect(parts.label).toBe(`  ${marker} subagent`);
+      expect(parts.label).toEqual([`  ${marker} subagent`]);
       expect(parts.meta).toBe("");
     }
   });
@@ -373,19 +445,136 @@ describe("rowParts", () => {
       row({ label: "review", isCurrent: true, depth: 3, outcome: "succeeded", time: { created: T0, updated: T0 + 5_000 } }),
       T0 + 5_000,
     );
-    expect(parts.label).toBe("› [✓]     review");
+    expect(parts.label).toEqual(["› [✓]     review"]);
     expect(parts.meta).toBe("          ↳ ⏱ 00:05");
+  });
+
+  it("wraps a long label to a second line with the four-space indent", () => {
+    const parts = rowParts(
+      row({
+        label: "RDD review lens retry (review-reliability)",
+        tokens: 1_564,
+        outcome: "succeeded",
+        time: { created: T0, updated: T0 + 305_000 },
+      }),
+      T0 + 305_000,
+      { cost: false },
+    );
+    expect(parts.label).toEqual(["  [✓] RDD review lens retry", "    (review-reliability)"]);
+    expect(parts.meta).toBe("      ↳ ⏱ 05:05  1,564 tok");
+  });
+
+  it("ellipsizes the model away when the label alone fills both lines", () => {
+    const parts = rowParts(
+      row({ label: "RDD review lens retry (review-reliability)", model: "space-bunny-free" }),
+      T0,
+    );
+    expect(parts.label).toEqual(["  [○] RDD review lens retry", "    (review-reliability) · space…"]);
+  });
+
+  it("drops the model segment entirely with `model: false`, wrapping unchanged", () => {
+    const base = {
+      label: "RDD review lens retry (review-reliability)",
+      model: "space-bunny-free",
+      tokens: 1_564,
+      outcome: "succeeded" as const,
+      time: { created: T0, updated: T0 + 305_000 },
+    };
+    const parts = rowParts(row(base), T0 + 305_000, { model: false });
+    expect(parts.label).toEqual(["  [✓] RDD review lens retry", "    (review-reliability)"]);
+    // Nothing else moves: same state, same meta, same wrapping.
+    expect(parts.state).toBe("done");
+    expect(parts.meta).toBe("      ↳ ⏱ 05:05  1,564 tok");
+  });
+
+  it("keeps the model by default and with `model: true`", () => {
+    const base = { label: "docs", model: "space-bunny-free" };
+    expect(rowParts(row(base), T0).label).toEqual(["  [○] docs · space-bunny-free"]);
+    expect(rowParts(row(base), T0, {}).label).toEqual(["  [○] docs · space-bunny-free"]);
+    expect(rowParts(row(base), T0, { model: true }).label).toEqual(["  [○] docs · space-bunny-free"]);
+  });
+
+  it("honours an explicit labelWidth in both directions", () => {
+    const base = { label: "RDD review lens retry (review-reliability)", outcome: "succeeded" as const };
+    // Wide enough to hold the whole label on one line.
+    expect(rowParts(row(base), T0, { labelWidth: 60 }).label).toEqual([
+      "  [✓] RDD review lens retry (review-reliability)",
+    ]);
+    // Narrower than the default: two lines, the second ellipsized to 12 columns.
+    expect(rowParts(row(base), T0, { labelWidth: 12 }).label).toEqual([
+      "  [✓] RDD review",
+      "    lens retry …",
+    ]);
+    expect(Array.from("lens retry …").length).toBe(12);
+  });
+
+  it("does not throw on a non-positive or non-finite labelWidth", () => {
+    const base = { label: "RDD review lens retry (review-reliability)", outcome: "succeeded" as const };
+    for (const labelWidth of [0, -8, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => rowParts(row(base), T0, { labelWidth })).not.toThrow();
+      expect(rowParts(row(base), T0, { labelWidth }).label.length).toBeGreaterThan(0);
+    }
+    // A width that cannot be measured degrades to the text on one line, intact.
+    expect(rowParts(row(base), T0, { labelWidth: 0 }).label).toEqual([
+      "  [✓] RDD review lens retry (review-reliability)",
+    ]);
+  });
+
+  it("takes no cost and no model together, keeping the continuation indent", () => {
+    const parts = rowParts(
+      row({
+        label: "RDD review lens retry (review-reliability)",
+        model: "space-bunny-free",
+        tokens: 1_564,
+        outcome: "succeeded",
+        time: { created: T0, updated: T0 + 305_000 },
+      }),
+      T0 + 305_000,
+      { cost: false, model: false },
+    );
+    expect(parts.label).toEqual(["  [✓] RDD review lens retry", "    (review-reliability)"]);
+    expect(parts.meta).toBe("      ↳ ⏱ 05:05  1,564 tok");
+    expect(parts.meta).not.toContain("$");
+    expect(parts.label.join("")).not.toContain("space-bunny-free");
+  });
+
+  it("suppresses only the cost when only `cost: false` is asked for", () => {
+    const parts = rowParts(row({ label: "docs", model: "space-bunny-free", cost: 0.04 }), T0, {
+      cost: false,
+    });
+    expect(parts.label).toEqual(["  [○] docs · space-bunny-free"]);
+    expect(parts.meta).toBe("");
+  });
+
+  it("keeps a short label on exactly one line", () => {
+    expect(rowParts(row({ label: "docs" }), T0).label).toEqual(["  [○] docs"]);
+  });
+
+  it("puts the permission marker on the last label line", () => {
+    const parts = rowParts(
+      row({ label: "F4 context usage percent (general)", needsPermission: true }),
+      T0,
+    );
+    expect(parts.label).toEqual(["  [○] F4 context usage percent", "    (general) ⚠"]);
+  });
+
+  it("still indents the first line by depth when the label wraps", () => {
+    const parts = rowParts(
+      row({ label: "F4 context usage percent (general)", depth: 3 }),
+      T0,
+    );
+    expect(parts.label).toEqual(["  [○]     F4 context usage percent", "    (general)"]);
   });
 
   it("keeps the permission marker on the label line", () => {
     const parts = rowParts(row({ label: "plan", needsPermission: true }), T0);
-    expect(parts.label).toBe("  [○] plan ⚠");
+    expect(parts.label).toEqual(["  [○] plan ⚠"]);
     expect(parts.meta).toBe("");
   });
 
   it("drops zero metrics and keeps the meta line free of the model", () => {
     const parts = rowParts(row({ label: "plan", model: "gpt-5", tokens: 0, cost: 0, time: { created: T0, updated: T0 } }), T0);
-    expect(parts.label).toBe("  [○] plan · gpt-5");
+    expect(parts.label).toEqual(["  [○] plan · gpt-5"]);
     expect(parts.meta).toBe("      ↳ ⏱ 00:00");
   });
 
@@ -449,7 +638,7 @@ describe("rowParts cost option", () => {
 
   it("leaves the label line untouched when the cost is switched off", () => {
     const parts = rowParts(row(COSTED), T0 + 2_194_000, { cost: false });
-    expect(parts.label).toBe("  [✓] general · space-bunny-free");
+    expect(parts.label).toEqual(["  [✓] general · space-bunny-free"]);
     expect(parts.state).toBe("done");
   });
 
@@ -460,7 +649,7 @@ describe("rowParts cost option", () => {
 
   it("keeps the permission marker on the label line either way", () => {
     const pending = row({ label: "docs", needsPermission: true, cost: 0.04 });
-    expect(rowParts(pending, T0, { cost: false }).label).toBe("  [○] docs ⚠");
+    expect(rowParts(pending, T0, { cost: false }).label).toEqual(["  [○] docs ⚠"]);
     expect(rowParts(pending, T0, { cost: false }).meta).toBe("");
   });
 });

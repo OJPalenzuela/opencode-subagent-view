@@ -196,10 +196,15 @@ function SubagentGlance(props: {
         <For each={rows()}>
           {(row: SubagentRow) => {
             // `{ cost: false }` is the whole difference from a panel row.
-            const parts = () => rowParts(row, now(), { cost: false });
+            // `cost: false` and `model: false`: the sidebar is the narrow surface, so it
+// spends its two label lines on the task and its one meta line on the metrics.
+const parts = () => rowParts(row, now(), { cost: false, model: false });
             return (
               <box flexDirection="column">
-                <text fg={fg(row)}>{parts().label}</text>
+                {/* One node per wrapped label line, all in the row's color. */}
+                <For each={parts().label}>
+                  {(line) => <text fg={fg(row)}>{line}</text>}
+                </For>
                 <Show when={parts().meta !== ""}>
                   <text fg={subdued()}>{parts().meta}</text>
                 </Show>
