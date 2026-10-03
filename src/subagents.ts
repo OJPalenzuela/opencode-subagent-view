@@ -451,6 +451,36 @@ export function rowParts(row: SubagentRow, now: number, options?: RowPartsOption
   return { state, label: labelLines, meta: metaLine };
 }
 
+/** Arrow glyphs for a collapsible header title, as the reference plugin uses. */
+const TITLE_EXPANDED = "▾";
+const TITLE_COLLAPSED = "▸";
+
+/**
+ * A collapsible header's title line: `▾ Subagents` open, `▸ Subagents` closed.
+ *
+ * No title means no title line at all — the counts stand alone, which is how the
+ * panel renders it, and returning `""` rather than a lone arrow keeps a caller
+ * from drawing a clickable nothing.
+ */
+export function headerTitle(title: string, expanded: boolean): string {
+  const text = title.trim();
+  if (text === "") return "";
+  return `${expanded ? TITLE_EXPANDED : TITLE_COLLAPSED} ${text}`;
+}
+
+/**
+ * Whether the sidebar draws its subagent rows: only when the user has it open
+ * *and* there is something to show.
+ *
+ * Both halves matter, and in this order. With no subagents there is no widget at
+ * all rather than a collapsed one — a collapsed header in a session that never
+ * spawned anything is indistinguishable from the widget being broken, which is
+ * exactly the confusion this sidebar has already caused.
+ */
+export function drawsSidebarRows(expanded: boolean, hasRows: boolean): boolean {
+  return expanded && hasRows;
+}
+
 /** Header counts as three separately colored segments: `● 2 run`, `✓ 1 done`, `✕ 0 err`. */
 export function headerSegments(total: SubagentCounts): HeaderSegment[] {
   return [

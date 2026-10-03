@@ -16,18 +16,15 @@ import { Plugin } from "@opencode/plugin/tui";
 import type { Context } from "@opencode/plugin/tui/context";
 import type { JSX } from "@opentui/solid";
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
-import { buildSummary } from "./format.js";
+import { buildSummary, rowLabel } from "./format.js";
 import type { SessionLike, SessionStatus } from "./format.js";
 import { ensureMessages, resetSyncGuards, rowPercent } from "./context.js";
 import type { ModelInfoLike } from "./context.js";
-import { createCompletionTracker, finishedMessage } from "./alerts.js";
-import type { CompletionTracker, FinishedSubagent } from "./alerts.js";
+import { executionOutcome, finishedMessage, finishedRow, isSubagentSession, seenExecution } from "./alerts.js";
 import { COMMAND_IDS } from "./commands.js";
 import { registerFooter } from "./footer.js";
 import { PANEL_NAME, registerPanel } from "./panel.js";
 import { registerSidebar } from "./sidebar.js";
-import { collectSubagents } from "./subagents.js";
-import type { SubagentSession } from "./subagents.js";
 import { MARKERS, resolveFg, SUBDUED_FALLBACK, SUBDUED_TOKEN } from "./theme.js";
 
 const PLUGIN_ID = "subagent-view";
@@ -56,14 +53,6 @@ function safeStatus(context: Context, sessionID: string | undefined): SessionSta
   }
 }
 
-function safeList(context: Context): SubagentSession[] {
-  try {
-    return (context.data.session.list() ?? []) as SubagentSession[];
-  } catch {
-    return [];
-  }
-}
-
 /** The provider's model collection; carries the context limit, no `get` on it. */
 function safeModels(context: Context): ModelInfoLike[] {
   try {
@@ -73,53 +62,67 @@ function safeModels(context: Context): ModelInfoLike[] {
   }
 }
 
-/** The session the router is on, or `undefined` on `home` and `plugin` routes. */
-function currentSession(context: Context): string | undefined {
-  try {
-    const route = context.ui.router.current();
-    return route.type === "session" ? route.sessionID : undefined;
-  } catch {
-    return undefined;
-  }
-}
+/** The terminal execution events, each paired with the outcome it reports. */
+const EXECUTION_EVENTS = [
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+] as const;
 
 /**
- * Announce every subagent that finished since the last refresh.
+ * Announce one finished execution, if it belongs to a subagent.
  *
- * Fire and forget: the alert must never block a refresh, and both the read and
- * the notify are swallowed because the alert path is decoration on top of the
- * status line, never a reason to fail a render. Focus filtering is the host's
- * job (`when: "blurred"`), so there is no focus detection here.
+ * The event is the identity of a run, so this fires per execution rather than
+ * per outcome change: OpenCode can re-run a subagent on the same session id and a
+ * tracker keyed on the record's `outcome` would stay silent for every re-run.
  *
- * ponytail: one alert per finished subagent with no burst cap — a burst is
+ * Any subagent alerts, in any tree: the filter is the record's own `parentID`,
+ * which is pure and testable, and it does not drop a subagent that finished while
+ * the user was looking elsewhere. A root session has no parent and so can never
+ * announce its own turn.
+ *
+ * Fire and forget: the alert never blocks anything, and both the reads and the
+ * notify are swallowed because this path is decoration on top of the status line,
+ * never a reason to fail. Focus filtering is the host's job (`when: "blurred"`),
+ * so there is no focus detection here.
+ *
+ * ponytail: one alert per finished execution with no burst cap — a burst is
  * genuinely that many subagents finishing. Add a cap if bursts prove annoying.
  */
-function announceFinished(
+function announceExecution(
   context: Context,
-  tracker: CompletionTracker,
-  sessionID: string,
-  now: number,
+  seen: Map<string, string>,
+  type: string,
+  event: { readonly id?: string; readonly data?: { readonly sessionID?: string } },
 ): void {
-  let finished: FinishedSubagent[];
-  try {
-    finished = tracker.update(collectSubagents(safeList(context), sessionID));
-  } catch {
-    return;
-  }
+  const outcome = executionOutcome(type);
+  if (outcome === undefined) return;
 
-  for (const row of finished) {
-    try {
-      void context.attention
-        .notify({
-          title: row.label,
-          message: finishedMessage(row, now),
-          sound: { name: "subagent_done", when: "blurred" },
-          notification: { when: "blurred" },
-        })
-        .catch(() => {});
-    } catch {
-      // An unavailable attention layer must not break a refresh.
-    }
+  const sessionID = event?.data?.sessionID;
+  if (!sessionID) return;
+
+  try {
+    const record = safeGet(context, sessionID);
+    // A record that has not caught up with the event, or one the data layer
+    // cannot produce right now, is skipped rather than alerted on blind.
+    if (!record) return;
+    // The root-session invariant, and the only scope filter there is: no
+    // `parentID`, so this is a root session finishing its own turn.
+    if (!isSubagentSession(record)) return;
+
+    // A repeated delivery of the same event is not a second run.
+    if (!seenExecution(seen, sessionID, event?.id)) return;
+
+    void context.attention
+      .notify({
+        title: rowLabel(record),
+        message: finishedMessage(finishedRow(sessionID, record, outcome, 1), Date.now()),
+        sound: { name: "subagent_done", when: "blurred" },
+        notification: { when: "blurred" },
+      })
+      .catch(() => {});
+  } catch {
+    // An unavailable attention layer must not break the event handler.
   }
 }
 
@@ -236,24 +239,33 @@ export default Plugin.define({
   setup(context) {
     const [tick, setTick] = createSignal(0);
     let lastRefreshAt = 0;
-    const tracker = createCompletionTracker();
+    // One last-notified event id per session, so a redelivered event cannot
+    // alert twice while a genuine re-run — a different id on the same session —
+    // always can.
+    const seenExecutions = new Map<string, string>();
 
     const requestRefresh = () => {
       const stamp = Date.now();
       if (stamp - lastRefreshAt < REFRESH_COALESCE_MS) return;
       lastRefreshAt = stamp;
       setTick((value) => value + 1);
-
-      // Alerts cover the subagents of the session you are in. One tracker for
-      // the whole generation, so switching roots loses nothing: a subagent that
-      // finished after the plugin started is announced when you come back,
-      // and one that finished before it started stays history.
-      const sessionID = currentSession(context);
-      if (sessionID === undefined) return;
-      announceFinished(context, tracker, sessionID, stamp);
     };
 
     const stopEvents = context.data.listen(requestRefresh);
+
+    // Alerts are event-driven, so they are subscribed here rather than derived
+    // from a refresh: a subagent re-run on the same session id re-emits
+    // `execution.started` and finishes again with a new terminal event, which is
+    // the announcement the old outcome-diffing tracker could never produce.
+    const stopExecutions = EXECUTION_EVENTS.map((type) =>
+      context.data.on(type, (event) => {
+        try {
+          announceExecution(context, seenExecutions, type, event);
+        } catch {
+          // An alert must never take the event stream down.
+        }
+      }),
+    );
     // `limit.context` lives on the model list, and `location.model.list()` is a
     // cache read that stays empty until the collection is synced. Without this
     // the `NN% ctx` segment would silently never appear, in the line and in the
@@ -283,6 +295,7 @@ export default Plugin.define({
 
     return () => {
       stopEvents?.();
+      for (const stop of stopExecutions) stop?.();
       release?.();
       releasePanel?.();
       releaseFooter?.();

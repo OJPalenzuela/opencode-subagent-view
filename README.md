@@ -97,6 +97,7 @@ Under the sidebar's own sections the plugin shows the counts header and then the
 three subagents that matter most:
 
 ```
+▾ Subagents
 ● 0 run · ✓ 32 done · ✕ 0 err
   [✓] RDD review lens retry
     (review-reliability)
@@ -113,8 +114,14 @@ model is the panel's to show. The sidebar and the panel render through the same
 code, so they cannot drift apart; if you see a difference between them, that is a
 bug.
 
+- **Click the `▾ Subagents` title to collapse it** to just the counts, and click
+  again to bring the rows back. The choice is remembered across restarts. It
+  starts **expanded** — a collapsed widget reads as a broken one, so the rows are
+  there by default. With no subagents at all there is no widget, collapsed or
+  not.
 - **Three rows, never more.** The sidebar has no room to scroll, so this is a
   glance; `/subagents` is the detailed view, with every subagent and their costs.
+  The panel has no title toggle: it is already the view you open on purpose.
 - Same order as the panel: permission-pending first, then running, then the most
   recent activity. Same markers too (`●` running, `◌` idle, `✓` done, `✕`
   failed, `⊘` interrupted, `○` unknown).
@@ -144,12 +151,18 @@ The `subagent_done` sound and the desktop notification only play while the
 window is **blurred**, so a subagent finishing does not interrupt you in the
 middle of a prompt. OpenCode handles the focus check.
 
-Alerts are diffed against the previous refresh, one per finished subagent:
+Alerts are driven by the server's own execution events, so **one alert is raised
+per finished execution**:
 
-- A subagent that finished after the plugin started is announced, including one
-  you were not looking at when it finished. One that finished before the plugin
-  started is treated as history, so a reload or TUI restart stays quiet.
-- The same subagent is announced once, however much its numbers change after.
+- A re-used subagent announces **every** run. OpenCode can re-run a subagent on
+  the same session id, and the record keeps its previous outcome — so an alert
+  that watched for the outcome to change would stay silent for every re-run after
+  the first.
+- **Any subagent alerts, in any session tree** — including one that finished while
+  you were looking at a different tree. Your own root session never alerts on
+  itself.
+- The same event delivered twice is announced once. A reload announces nothing
+  that finished before it, because that completion emitted no event to miss.
 
 ## Footer counters
 
@@ -228,8 +241,8 @@ Restart the TUI after editing the config.
 | Panel permissions | Cached with `session.permission.sync` on open, and on every `permission.asked` |
 | Context window | Last assistant message's counters ÷ `limit.context` of the model it used; `location.model.list()` scanned, since that collection has no `get` |
 | Context data | `session.message.list()` cache read; the current session's messages are synced once per plugin generation, retried only if that sync fails |
-| Completion alerts | Diffed per refresh; sound and notification only while blurred |
-| Alert priming | The first snapshot is a baseline, so a reload announces nothing |
+| Completion alerts | Fired per finished `session.execution.*` event for any record with a `parentID`, so any subagent in any tree alerts; sound and notification only while blurred |
+| Alert de-duplication | Last-notified event id per session, so a redelivered event is silent but a re-run (a new id, same session) alerts |
 | Footer counters | `prompt.footer.status`, session id from the slot input; hidden with no session or no subagents |
 | Sidebar glance | `sidebar.content`, appended; the panel's header plus the top 3 rows of the panel's ordering as two-line rows without the cost segment; hidden when there are no subagents |
 

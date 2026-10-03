@@ -1,44 +1,129 @@
 /**
  * Completion alerts for finished subagents.
  *
- * The tracker is the whole state machine: it holds the last outcome seen per
- * subagent and reports the rows that just crossed into a terminal state. It is
- * pure and TUI-free so every rule below is unit tested without a host.
+ * Alerts are raised per **execution**, driven by the server's own
+ * `session.execution.*` events. That is strictly better than the poll this
+ * replaced, and the reason is one specific behaviour: OpenCode can re-run a
+ * subagent session, emitting `session.execution.started` again on the *same* id
+ * while the record keeps its previous `outcome`. A tracker keyed on the outcome
+ * field therefore sees nothing change on a re-run and stays silent forever —
+ * exactly the bug this module exists to not have.
  *
- * A subagent that finished after the plugin started is news; one that finished
- * before it started is history. That single rule is why a reload stays silent
- * and why a completion missed while the tree was empty is still announced.
+ * The server's event is the identity of a run, so the history-vs-news question
+ * that needed a `startedAt` priming heuristic disappears: a completion that
+ * happened before the plugin loaded produced no event this generation could
+ * miss, and one that happens after it always does.
  *
- * Callers pass rows already filtered to the root's subagents, so this never
- * walks the session tree, and a partial row is skipped rather than fatal.
+ * Everything here is pure and TUI-free, so every rule is unit tested without a
+ * host. The subscription lives in `src/tui.tsx`.
  */
 
-import { elapsedMs, finite, formatCost, formatDuration, formatTokens } from "./format.js";
-import type { Outcome } from "./format.js";
+import { elapsedMs, finite, formatCost, formatDuration, formatTokens, rowLabel } from "./format.js";
+import type { Outcome, SessionLike } from "./format.js";
 import type { SubagentRow } from "./subagents.js";
 
-/** A row that has reached a terminal outcome and has not been reported yet. */
+/** A row that has reached a terminal outcome. */
 export interface FinishedSubagent extends SubagentRow {
   readonly outcome: Outcome;
 }
 
-/** The three outcomes worth alerting on. Anything else stays non-terminal. */
-const ALERTED: ReadonlySet<Outcome> = new Set<Outcome>(["succeeded", "failed", "interrupted"]);
+/** The execution events worth alerting on, and the outcome each one means. */
+const EXECUTION_OUTCOMES = {
+  "session.execution.succeeded": "succeeded",
+  "session.execution.failed": "failed",
+  "session.execution.interrupted": "interrupted",
+} as const satisfies Record<string, Outcome>;
 
-const SEPARATOR = " · ";
-
-function alertedOutcome(row: SubagentRow): Outcome | undefined {
-  return row.outcome !== undefined && ALERTED.has(row.outcome) ? row.outcome : undefined;
+/** The parts of an execution event envelope the alert path reads. */
+export interface ExecutionEventLike {
+  readonly id?: string;
+  readonly data?: { readonly sessionID?: string };
 }
 
-/** When the row stopped, or `undefined` if it never reported a time. */
-function endedAt(row: SubagentRow): number | undefined {
-  return finite(row.time?.idle) ?? finite(row.time?.updated);
+/**
+ * The outcome a terminal execution event reports, or `undefined` for a
+ * non-terminal or unrecognized one — which is the signal to stay silent.
+ */
+export function executionOutcome(type: string): Outcome | undefined {
+  return Object.hasOwn(EXECUTION_OUTCOMES, type)
+    ? EXECUTION_OUTCOMES[type as keyof typeof EXECUTION_OUTCOMES]
+    : undefined;
+}
+
+/**
+ * Whether a record is a subagent session, and so worth alerting on.
+ *
+ * A subagent is a session with a parent; the root session has none and must never
+ * announce itself. An empty or blank `parentID` is not a parent.
+ *
+ * This replaces comparing `session.root()` of the event against the routed
+ * session's, for two reasons. It is pure, so the filter is unit tested with no
+ * host harness — the root comparison needed a live `Context` and could only be
+ * inspected. And it does not lose a late arrival: an execution finishing while the
+ * user is looking at another tree still alerts, which root-scoping dropped.
+ */
+export function isSubagentSession(record: unknown): boolean {
+  if (typeof record !== "object" || record === null) return false;
+  const parentID = (record as { readonly parentID?: unknown }).parentID;
+  return typeof parentID === "string" && parentID.trim() !== "";
+}
+
+/**
+ * Input + output, the same total the status line and the panel rows show.
+ *
+ * Reasoning and cache counters are deliberately left out, exactly as
+ * `toRow` sums it: `NN% ctx` needs them, a "how many tokens" number does not, and
+ * the two surfaces agreeing on one total is worth more than a bigger number here.
+ */
+function tokenTotal(session: SessionLike): number | undefined {
+  const tokens = session.tokens;
+  if (!tokens) return undefined;
+  return (finite(tokens.input) ?? 0) + (finite(tokens.output) ?? 0);
+}
+
+/**
+ * The row `finishedMessage` consumes, from a session record plus the outcome the
+ * event reported. The event is the authority on the outcome, so it overrides
+ * whatever the record still says — the whole point of the change.
+ */
+export function finishedRow(
+  sessionID: string,
+  session: SessionLike,
+  outcome: Outcome,
+  depth: number,
+): FinishedSubagent {
+  return {
+    id: sessionID,
+    label: rowLabel(session),
+    model: session.model?.id,
+    tokens: tokenTotal(session),
+    cost: finite(session.cost),
+    time: session.time,
+    outcome,
+    status: undefined,
+    needsPermission: false,
+    isCurrent: false,
+    depth: Math.max(1, depth),
+  };
+}
+
+/**
+ * Whether this event is new for its session, remembering it either way.
+ *
+ * Event ids are unique, so a repeat of the same id is the same execution being
+ * delivered twice, not a second run. A missing id is treated as new: a blank id
+ * must not be able to swallow a real alert.
+ */
+export function seenExecution(seen: Map<string, string>, sessionID: string, eventID?: string): boolean {
+  const previous = seen.get(sessionID);
+  seen.set(sessionID, eventID ?? "");
+  return eventID === undefined || eventID === "" || previous !== eventID;
 }
 
 /**
  * `succeeded · ⏱ 02:34 · 12.4k tok · $0.04`. Every segment is dropped when its
- * data is missing, so the outcome word is always the first thing read.
+ * data is missing, so the outcome word is always the first thing read. Unchanged
+ * by execution scoping: only *when* an alert fires moved, never what it says.
  */
 export function finishedMessage(row: FinishedSubagent, now: number): string {
   const parts: string[] = [row.outcome];
@@ -49,62 +134,5 @@ export function finishedMessage(row: FinishedSubagent, now: number): string {
   if (row.tokens !== undefined && row.tokens > 0) parts.push(`${formatTokens(row.tokens)} tok`);
   if (row.cost !== undefined && row.cost > 0) parts.push(formatCost(row.cost));
 
-  return parts.join(SEPARATOR);
-}
-
-/** Rows of the current root come in, rows that just finished come out. */
-export interface CompletionTracker {
-  update(rows: readonly SubagentRow[]): FinishedSubagent[];
-}
-
-export interface CompletionTrackerOptions {
-  /** When the plugin started. Injectable so the clock rule is testable. */
-  readonly startedAt?: number;
-}
-
-/**
- * Feed it the root's subagent rows on every refresh; get back the ones that
- * just finished. One instance per plugin generation.
- *
- * "Finished before I started looking?" is not answerable from row data, so it
- * is answered by the row's own terminal time against `startedAt`: older is
- * history and stays silent, which is what stops a reload from replaying old
- * completions. The id memory only handles the rest — real transitions, and the
- * repeat sightings that a transient empty or partial refresh produces.
- *
- * ponytail: `seen` grows with distinct subagent ids per plugin generation
- * (kilobytes even after thousands of subagents). Add an eviction policy if that
- * ever matters.
- */
-export function createCompletionTracker(options: CompletionTrackerOptions = {}): CompletionTracker {
-  const startedAt = options.startedAt ?? Date.now();
-  const seen = new Map<string, Outcome | undefined>();
-
-  return {
-    update(rows) {
-      const finished: FinishedSubagent[] = [];
-
-      for (const row of rows) {
-        if (typeof row?.id !== "string" || row.id === "") continue;
-
-        const outcome = alertedOutcome(row);
-        const previous = seen.get(row.id);
-        // Never rebuilt from the current rows: a snapshot that lost a row must
-        // not forget it. A row that lost its outcome keeps the recorded one.
-        seen.set(row.id, outcome ?? previous);
-        if (outcome === undefined) continue;
-
-        const ended = endedAt(row);
-        const isNews = previous !== undefined
-          // A recorded outcome that changes is a real transition.
-          ? previous !== outcome
-          // First sighting: only news, never history.
-          : ended !== undefined && ended >= startedAt;
-
-        if (isNews) finished.push({ ...row, outcome });
-      }
-
-      return finished;
-    },
-  };
+  return parts.join(" · ");
 }

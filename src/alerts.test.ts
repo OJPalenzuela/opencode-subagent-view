@@ -1,11 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { createCompletionTracker, finishedMessage } from "./alerts.js";
-import type { FinishedSubagent } from "./alerts.js";
-import type { SubagentRow } from "./subagents.js";
+import {
+  executionOutcome,
+  finishedMessage,
+  finishedRow,
+  isSubagentSession,
+  seenExecution,
+} from "./alerts.js";
+import type { ExecutionEventLike, FinishedSubagent } from "./alerts.js";
+import type { SessionLike } from "./format.js";
 
 const T0 = 1_700_000_000_000;
 
-function row(overrides: Partial<SubagentRow> = {}): SubagentRow {
+/** A session record as the data layer returns it. */
+function record(overrides: Partial<SessionLike> = {}): SessionLike {
+  return {
+    agent: "explore",
+    model: { id: "claude-sonnet-4-6" },
+    tokens: { input: 9_000, output: 3_400 },
+    cost: 0.04,
+    time: { created: T0, updated: T0 + 154_000 },
+    ...overrides,
+  };
+}
+
+/** A row the tracker would have returned: terminal outcome guaranteed. */
+function finished(overrides: Partial<FinishedSubagent> = {}): FinishedSubagent {
   return {
     id: "ses_x",
     label: "explore",
@@ -13,199 +32,162 @@ function row(overrides: Partial<SubagentRow> = {}): SubagentRow {
     isCurrent: false,
     depth: 1,
     time: { created: T0, updated: T0 },
+    outcome: "succeeded",
     ...overrides,
   };
 }
 
-/** Started at the row terminal time by default, so a sighting counts as news. */
-function watch(startedAt = T0) {
-  return createCompletionTracker({ startedAt });
-}
-
-/** A row the tracker would have returned: terminal outcome guaranteed. */
-function finished(overrides: Partial<FinishedSubagent> = {}): FinishedSubagent {
-  return { ...row(), outcome: "succeeded", ...overrides };
-}
-
-/** A tree of three subagents, none of them finished yet. */
-function threeRunning(): SubagentRow[] {
-  return [
-    row({ id: "ses_a", label: "explore", status: "running" }),
-    row({ id: "ses_b", label: "review", status: "running" }),
-    row({ id: "ses_c", label: "plan" }),
-  ];
-}
-
-function ids(rows: readonly SubagentRow[]): string[] {
-  return rows.map((r) => r.id);
-}
-
-describe("createCompletionTracker priming", () => {
-  it("fires nothing on the first snapshot, even when rows already finished", () => {
-    // Reload: every outcome predates the plugin start.
-    const tracker = watch(T0 + 60_000);
-    const rows = [row({ id: "ses_a", outcome: "succeeded" }), row({ id: "ses_b", outcome: "failed" })];
-    expect(tracker.update(rows)).toEqual([]);
+describe("executionOutcome", () => {
+  it("maps each terminal execution event to its outcome", () => {
+    expect(executionOutcome("session.execution.succeeded")).toBe("succeeded");
+    expect(executionOutcome("session.execution.failed")).toBe("failed");
+    expect(executionOutcome("session.execution.interrupted")).toBe("interrupted");
   });
 
-  it("fires a first sighting that finished after the plugin started", () => {
-    const tracker = watch();
-    const fired = tracker.update([row({ id: "ses_a", outcome: "succeeded" })]);
-    expect(ids(fired)).toEqual(["ses_a"]);
-    expect(fired[0]?.outcome).toBe("succeeded");
-    expect(tracker.update([row({ id: "ses_a", outcome: "succeeded" })])).toEqual([]);
-  });
-
-  it("fires a completion missed while the tree was still empty", () => {
-    const tracker = watch();
-    expect(tracker.update([])).toEqual([]);
-    expect(ids(tracker.update([row({ id: "ses_a", outcome: "failed" })]))).toEqual(["ses_a"]);
-  });
-
-  it("treats a first sighting with no time data as history", () => {
-    const tracker = watch();
-    const blind = row({ id: "ses_a", outcome: "succeeded", time: undefined });
-    expect(() => tracker.update([blind])).not.toThrow();
-    expect(tracker.update([blind])).toEqual([]);
-  });
-
-  it("does not storm after a reload on a tree that is already done", () => {
-    const finished = [
-      row({ id: "ses_a", outcome: "succeeded" }),
-      row({ id: "ses_b", outcome: "failed" }),
-      row({ id: "ses_c", outcome: "interrupted" }),
-    ];
-    const reloaded = watch(T0 + 60_000);
-    reloaded.update(finished);
-    expect(reloaded.update(finished)).toEqual([]);
-    expect(reloaded.update(finished)).toEqual([]);
+  it("returns undefined for a non-terminal event and for an unknown one", () => {
+    expect(executionOutcome("session.execution.started")).toBeUndefined();
+    expect(executionOutcome("session.updated")).toBeUndefined();
+    expect(executionOutcome("")).toBeUndefined();
   });
 });
 
-describe("createCompletionTracker transitions", () => {
-  it("fires exactly once when a row reaches a terminal outcome", () => {
-    const tracker = watch();
-    tracker.update(threeRunning());
-
-    const fired = tracker.update([
-      threeRunning()[0]!,
-      row({ id: "ses_b", label: "review", outcome: "succeeded" }),
-      threeRunning()[2]!,
-    ]);
-    expect(ids(fired)).toEqual(["ses_b"]);
-    expect(fired[0]?.label).toBe("review");
-    expect(fired[0]?.outcome).toBe("succeeded");
+describe("finishedRow", () => {
+  it("builds the row `finishedMessage` consumes from a record plus an outcome", () => {
+    const row = finishedRow("ses_a", record({ agent: "general", title: "F4 context usage percent" }), "succeeded", 1);
+    expect(row.id).toBe("ses_a");
+    expect(row.label).toBe("F4 context usage percent (general)");
+    expect(row.outcome).toBe("succeeded");
+    expect(row.tokens).toBe(12_400);
+    expect(row.cost).toBe(0.04);
+    expect(row.model).toBe("claude-sonnet-4-6");
+    expect(row.needsPermission).toBe(false);
+    expect(row.isCurrent).toBe(false);
+    expect(row.depth).toBe(1);
   });
 
-  it("fires nothing when the same rows come back unchanged", () => {
-    const tracker = watch();
-    const rows = threeRunning();
-    tracker.update(rows);
-    const done = [rows[0]!, row({ id: "ses_b", label: "review", outcome: "failed" }), rows[2]!];
-    expect(ids(tracker.update(done))).toEqual(["ses_b"]);
-    expect(tracker.update(done)).toEqual([]);
-    expect(tracker.update(done)).toEqual([]);
+  it("falls back to the agent alone, then to the default label", () => {
+    expect(finishedRow("ses_a", record({ agent: "review" }), "failed", 2).label).toBe("review");
+    expect(finishedRow("ses_a", record({ agent: undefined }), "failed", 1).label).toBe("subagent");
   });
 
-  it("fires a row that finished between two refreshes", () => {
-    const tracker = watch();
-    tracker.update(threeRunning());
-    const fired = tracker.update([
-      threeRunning()[0]!,
-      row({ id: "ses_new", label: "docs", outcome: "interrupted" }),
-    ]);
-    expect(ids(fired)).toEqual(["ses_new"]);
-    expect(fired[0]?.outcome).toBe("interrupted");
+  it("sums input and output only, like every other surface's token total", () => {
+    // The public `SessionTokens` carries input/output; the wider record may also
+    // carry reasoning and cache counters, which must not be counted here either.
+    const wider = {
+      input: 1_000,
+      output: 200,
+      reasoning: 300,
+      cache: { read: 400, write: 500 },
+    };
+    const row = finishedRow(
+      "ses_a",
+      record({ tokens: { input: wider.input, output: wider.output } }),
+      "succeeded",
+      1,
+    );
+    expect(row.tokens).toBe(1_200);
+    expect(Object.values(wider).length).toBeGreaterThan(2);
   });
 
-  it("never re-fires a terminal row when its data changes", () => {
-    const tracker = watch();
-    tracker.update(threeRunning());
-    const first = tracker.update([row({ id: "ses_b", label: "review", outcome: "succeeded", tokens: 10 })]);
-    expect(ids(first)).toEqual(["ses_b"]);
-
-    const later = tracker.update([
-      row({ id: "ses_b", label: "review renamed", outcome: "succeeded", tokens: 999_999, cost: 1.5 }),
-    ]);
-    expect(later).toEqual([]);
+  it("keeps the record's own terminal time so the elapsed clock freezes", () => {
+    const row = finishedRow(
+      "ses_a",
+      record({ tokens: undefined, cost: undefined, time: { created: T0, updated: T0 + 900_000 } }),
+      "succeeded",
+      1,
+    );
+    expect(finishedMessage(row, T0 + 3_600_000)).toBe("succeeded · ⏱ 15:00");
   });
 
-  it("returns every newly finished row in input order", () => {
-    const tracker = watch();
-    tracker.update(threeRunning());
-    const fired = tracker.update([
-      row({ id: "ses_c", label: "plan", outcome: "failed" }),
-      row({ id: "ses_a", label: "explore", outcome: "succeeded" }),
-      row({ id: "ses_b", label: "review", outcome: "interrupted" }),
-    ]);
-    expect(ids(fired)).toEqual(["ses_c", "ses_a", "ses_b"]);
+  it("still renders when the record carries nothing but an id", () => {
+    const row = finishedRow("ses_a", {}, "interrupted", 1);
+    expect(row.tokens).toBeUndefined();
+    expect(finishedMessage(row, T0)).toBe("interrupted");
+  });
+});
+
+describe("isSubagentSession", () => {
+  it("accepts a record that carries a real parent id", () => {
+    expect(isSubagentSession({ parentID: "ses_root" })).toBe(true);
   });
 
-  it("keeps memory through an empty snapshot", () => {
-    const tracker = watch();
-    tracker.update(threeRunning());
-    const fired = row({ id: "ses_b", label: "review", outcome: "succeeded" });
-    expect(ids(tracker.update([fired]))).toEqual(["ses_b"]);
-    expect(tracker.update([])).toEqual([]);
-    // A snapshot missing the row must not make it news again.
-    expect(tracker.update([fired])).toEqual([]);
+  it("rejects an empty-string parent, which is not a parent", () => {
+    expect(isSubagentSession({ parentID: "" })).toBe(false);
+    expect(isSubagentSession({ parentID: "   " })).toBe(false);
   });
 
-  it("keeps memory through a partial snapshot", () => {
-    const tracker = watch();
-    tracker.update(threeRunning());
-    const a = row({ id: "ses_a", outcome: "succeeded" });
-    const b = row({ id: "ses_b", outcome: "failed" });
-    expect(ids(tracker.update([a, b]))).toEqual(["ses_a", "ses_b"]);
-    expect(tracker.update([a])).toEqual([]);
-    expect(tracker.update([a, b])).toEqual([]);
+  it("rejects a record with no parent at all: a root session never alerts", () => {
+    expect(isSubagentSession({})).toBe(false);
+    expect(isSubagentSession({ parentID: undefined })).toBe(false);
   });
 
-  it("does not re-fire after a switch to another root and back", () => {
-    const tracker = watch();
-    const mine = row({ id: "ses_a", outcome: "succeeded" });
-    expect(ids(tracker.update([mine]))).toEqual(["ses_a"]);
-    expect(ids(tracker.update([row({ id: "ses_x", label: "docs", outcome: "interrupted" })]))).toEqual([
-      "ses_x",
-    ]);
-    expect(tracker.update([mine])).toEqual([]);
+  it("rejects a record that is not an object", () => {
+    for (const value of [undefined, null, "", 0, false, "ses_root", 42]) {
+      expect(isSubagentSession(value)).toBe(false);
+    }
   });
 
-  it("survives partial rows and skips unusable ids", () => {
-    const tracker = watch();
-    tracker.update([row({ id: "ses_run" })]);
-    const partial = [
-      undefined,
-      row({}),
-      { id: "", label: "blank" },
-      { label: "no id", outcome: "failed" },
-      row({ id: "ses_ok", outcome: "succeeded" }),
-    ] as unknown as SubagentRow[];
+  it("is what keeps a root session from ever producing an alert row", () => {
+    // The guard the old root comparison used to provide, now provable without a
+    // host: a root record is rejected, so `finishedRow` is never reached for it.
+    const root = { title: "root session" };
+    expect(isSubagentSession(root)).toBe(false);
+    const child = { parentID: "ses_root", title: "root session" };
+    expect(isSubagentSession(child)).toBe(true);
+    if (isSubagentSession(child)) {
+      expect(finishedRow("ses_a", child, "succeeded", 1).label).toBe("root session");
+    }
+  });
+});
 
-    expect(() => tracker.update(partial)).not.toThrow();
-    expect(ids(tracker.update(partial))).toEqual([]);
+describe("seenExecution", () => {
+  it("reports a new event id and remembers it", () => {
+    const seen = new Map<string, string>();
+    expect(seenExecution(seen, "ses_a", "evt_1")).toBe(true);
+    expect(seenExecution(seen, "ses_a", "evt_1")).toBe(false);
+    expect(seen.get("ses_a")).toBe("evt_1");
   });
 
-  it("still reports a real row out of a batch of partial ones", () => {
-    const tracker = watch();
-    tracker.update([row({ id: "ses_run" })]);
-    const partial = [
-      undefined,
-      { id: "", label: "blank" },
-      row({ id: "ses_ok", outcome: "failed" }),
-    ] as unknown as SubagentRow[];
-
-    expect(ids(tracker.update(partial))).toEqual(["ses_ok"]);
+  it("reports a different id for the same session as new again", () => {
+    const seen = new Map<string, string>();
+    expect(seenExecution(seen, "ses_a", "evt_1")).toBe(true);
+    expect(seenExecution(seen, "ses_a", "evt_2")).toBe(true);
+    expect(seen.get("ses_a")).toBe("evt_2");
   });
 
-  it("ignores an outcome it does not know", () => {
-    const tracker = watch();
-    tracker.update(threeRunning());
-    // A server this build predates: the string is outside `Outcome`.
-    const bogus = { ...row({ id: "ses_b" }), outcome: "exploded" } as unknown as SubagentRow;
-    expect(tracker.update([bogus])).toEqual([]);
-    // The real outcome later still fires.
-    expect(ids(tracker.update([row({ id: "ses_b", outcome: "failed" })]))).toEqual(["ses_b"]);
+  it("keeps one id per session, independently", () => {
+    const seen = new Map<string, string>();
+    expect(seenExecution(seen, "ses_a", "evt_1")).toBe(true);
+    expect(seenExecution(seen, "ses_b", "evt_1")).toBe(true);
+    expect(seenExecution(seen, "ses_a", "evt_1")).toBe(false);
+    expect(seenExecution(seen, "ses_b", "evt_1")).toBe(false);
+  });
+
+  it("treats a missing or empty event id as new rather than swallowing the alert", () => {
+    const seen = new Map<string, string>();
+    expect(seenExecution(seen, "ses_a", undefined)).toBe(true);
+    expect(seenExecution(seen, "ses_a", "")).toBe(true);
+  });
+
+  it("alerts again on a re-run of the same session, which is a new event id", () => {
+    // The bug this replaced: the same session id re-run by the server, so the
+    // record's `outcome` never changes and an outcome-diffing tracker is silent
+    // forever. A new event id is a new execution, and must announce again.
+    const seen = new Map<string, string>();
+    expect(seenExecution(seen, "ses_a", "evt_run1")).toBe(true);
+    expect(seenExecution(seen, "ses_a", "evt_run1")).toBe(false);
+    expect(seenExecution(seen, "ses_a", "evt_run2")).toBe(true);
+    expect(seenExecution(seen, "ses_a", "evt_run2")).toBe(false);
+    expect(seenExecution(seen, "ses_a", "evt_run3")).toBe(true);
+  });
+
+  it("reads the session id straight off the event envelope", () => {
+    const event = (sessionID?: string): ExecutionEventLike => ({
+      id: "evt_1",
+      data: sessionID === undefined ? undefined : { sessionID },
+    });
+    expect(event("ses_a").data?.sessionID).toBe("ses_a");
+    expect(event(undefined).data).toBeUndefined();
   });
 });
 

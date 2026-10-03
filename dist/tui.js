@@ -98,8 +98,8 @@ function buildSummary(session, now, status) {
   const elapsed = elapsedMs(session, now);
   if (elapsed !== void 0) parts.push(`\u23F1 ${formatDuration(elapsed)}`);
   const tokens = session.tokens;
-  const tokenTotal2 = tokens ? (finite(tokens.input) ?? 0) + (finite(tokens.output) ?? 0) : 0;
-  if (tokenTotal2 > 0) parts.push(`${formatTokens(tokenTotal2)} tok`);
+  const tokenTotal3 = tokens ? (finite(tokens.input) ?? 0) + (finite(tokens.output) ?? 0) : 0;
+  if (tokenTotal3 > 0) parts.push(`${formatTokens(tokenTotal3)} tok`);
   const cost = finite(session.cost);
   if (cost !== void 0 && cost > 0) parts.push(formatCost(cost));
   const percent = finite(session.contextPercent);
@@ -190,13 +190,43 @@ function rowPercent(context, models, sessionID) {
 }
 
 // src/alerts.ts
-var ALERTED = /* @__PURE__ */ new Set(["succeeded", "failed", "interrupted"]);
-var SEPARATOR2 = " \xB7 ";
-function alertedOutcome(row) {
-  return row.outcome !== void 0 && ALERTED.has(row.outcome) ? row.outcome : void 0;
+var EXECUTION_OUTCOMES = {
+  "session.execution.succeeded": "succeeded",
+  "session.execution.failed": "failed",
+  "session.execution.interrupted": "interrupted"
+};
+function executionOutcome(type) {
+  return Object.hasOwn(EXECUTION_OUTCOMES, type) ? EXECUTION_OUTCOMES[type] : void 0;
 }
-function endedAt(row) {
-  return finite(row.time?.idle) ?? finite(row.time?.updated);
+function isSubagentSession(record) {
+  if (typeof record !== "object" || record === null) return false;
+  const parentID = record.parentID;
+  return typeof parentID === "string" && parentID.trim() !== "";
+}
+function tokenTotal(session) {
+  const tokens = session.tokens;
+  if (!tokens) return void 0;
+  return (finite(tokens.input) ?? 0) + (finite(tokens.output) ?? 0);
+}
+function finishedRow(sessionID, session, outcome, depth) {
+  return {
+    id: sessionID,
+    label: rowLabel(session),
+    model: session.model?.id,
+    tokens: tokenTotal(session),
+    cost: finite(session.cost),
+    time: session.time,
+    outcome,
+    status: void 0,
+    needsPermission: false,
+    isCurrent: false,
+    depth: Math.max(1, depth)
+  };
+}
+function seenExecution(seen, sessionID, eventID) {
+  const previous = seen.get(sessionID);
+  seen.set(sessionID, eventID ?? "");
+  return eventID === void 0 || eventID === "" || previous !== eventID;
 }
 function finishedMessage(row, now) {
   const parts = [row.outcome];
@@ -204,27 +234,7 @@ function finishedMessage(row, now) {
   if (elapsed !== void 0) parts.push(`\u23F1 ${formatDuration(elapsed)}`);
   if (row.tokens !== void 0 && row.tokens > 0) parts.push(`${formatTokens(row.tokens)} tok`);
   if (row.cost !== void 0 && row.cost > 0) parts.push(formatCost(row.cost));
-  return parts.join(SEPARATOR2);
-}
-function createCompletionTracker(options = {}) {
-  const startedAt = options.startedAt ?? Date.now();
-  const seen = /* @__PURE__ */ new Map();
-  return {
-    update(rows) {
-      const finished = [];
-      for (const row of rows) {
-        if (typeof row?.id !== "string" || row.id === "") continue;
-        const outcome = alertedOutcome(row);
-        const previous = seen.get(row.id);
-        seen.set(row.id, outcome ?? previous);
-        if (outcome === void 0) continue;
-        const ended = endedAt(row);
-        const isNews = previous !== void 0 ? previous !== outcome : ended !== void 0 && ended >= startedAt;
-        if (isNews) finished.push({ ...row, outcome });
-      }
-      return finished;
-    }
-  };
+  return parts.join(" \xB7 ");
 }
 
 // src/commands.ts
@@ -311,7 +321,7 @@ function rootOf(index, currentSessionID) {
   }
   return rootID;
 }
-function tokenTotal(session) {
+function tokenTotal2(session) {
   const tokens = session.tokens;
   if (!tokens) return void 0;
   return (finite(tokens.input) ?? 0) + (finite(tokens.output) ?? 0);
@@ -321,7 +331,7 @@ function toRow(session, depth, currentSessionID, getStatus, needsPermission) {
     id: session.id,
     label: rowLabel(session),
     model: session.model?.id,
-    tokens: tokenTotal(session),
+    tokens: tokenTotal2(session),
     cost: finite(session.cost),
     time: session.time,
     outcome: session.outcome,
@@ -417,7 +427,7 @@ function counts(rows) {
   return { running, done, failed };
 }
 var INDENT = "  ";
-var SEPARATOR3 = " \xB7 ";
+var SEPARATOR2 = " \xB7 ";
 var LABEL_WIDTH = 29;
 var LABEL_INDENT = "    ";
 var LABEL_LABEL_LINES = 2;
@@ -454,7 +464,7 @@ function rowParts(row, now, options) {
   const state = stateOf(row, now);
   const depth = Math.max(0, row.depth - 1);
   const current = row.isCurrent ? CURRENT_GLYPH : " ";
-  const label = row.model && options?.model !== false ? `${row.label}${SEPARATOR3}${row.model}` : row.label;
+  const label = row.model && options?.model !== false ? `${row.label}${SEPARATOR2}${row.model}` : row.label;
   const pending = row.needsPermission ? ` ${PERMISSION_GLYPH}` : "";
   const marker = `${current} ${MARKERS[state].bracketed} ${INDENT.repeat(depth)}`;
   const wrapped = wrapLabel(label, options?.labelWidth ?? LABEL_WIDTH, LABEL_LABEL_LINES, LABEL_INDENT);
@@ -473,8 +483,18 @@ function rowParts(row, now, options) {
   const percent = finite(row.contextPercent);
   if (percent !== void 0) rest.push(`${formatPercent(percent)}% ctx`);
   const segments = head === "" ? rest : [head, ...rest];
-  const metaLine = segments.length === 0 ? "" : `${" ".repeat(LABEL_COLUMN + INDENT.length * depth)}\u21B3 ${segments.join(SEPARATOR3)}`;
+  const metaLine = segments.length === 0 ? "" : `${" ".repeat(LABEL_COLUMN + INDENT.length * depth)}\u21B3 ${segments.join(SEPARATOR2)}`;
   return { state, label: labelLines, meta: metaLine };
+}
+var TITLE_EXPANDED = "\u25BE";
+var TITLE_COLLAPSED = "\u25B8";
+function headerTitle(title, expanded) {
+  const text = title.trim();
+  if (text === "") return "";
+  return `${expanded ? TITLE_EXPANDED : TITLE_COLLAPSED} ${text}`;
+}
+function drawsSidebarRows(expanded, hasRows) {
+  return expanded && hasRows;
 }
 function headerSegments(total) {
   return [
@@ -484,7 +504,7 @@ function headerSegments(total) {
   ];
 }
 function headerLine(total) {
-  return headerSegments(total).map((segment) => segment.text).join(SEPARATOR3);
+  return headerSegments(total).map((segment) => segment.text).join(SEPARATOR2);
 }
 function footerText(total) {
   return total.running + total.done + total.failed > 0 ? headerLine(total) : void 0;
@@ -534,11 +554,11 @@ function registerFooter(context, tick) {
 
 // src/panel.tsx
 import { use as _$use } from "@opentui/solid";
-import { effect as _$effect2 } from "@opentui/solid";
 import { createTextNode as _$createTextNode } from "@opentui/solid";
 import { insertNode as _$insertNode } from "@opentui/solid";
-import { insert as _$insert2 } from "@opentui/solid";
 import { createComponent as _$createComponent2 } from "@opentui/solid";
+import { effect as _$effect2 } from "@opentui/solid";
+import { insert as _$insert2 } from "@opentui/solid";
 import { setProp as _$setProp2 } from "@opentui/solid";
 import { createElement as _$createElement2 } from "@opentui/solid";
 import { createEffect, createMemo as createMemo2, createSignal, For, onCleanup, Show as Show2 } from "solid-js";
@@ -590,10 +610,33 @@ function safeModels(context) {
 }
 function SubagentHeader(props) {
   const segments = createMemo2(() => headerSegments(counts(props.rows)));
+  const title = () => headerTitle(props.title ?? "", props.expanded !== false);
+  const selected = () => resolveFg(props.context, SELECTED_TOKEN, SELECTED_FALLBACK);
   return (() => {
-    var _el$ = _$createElement2("box");
-    _$setProp2(_el$, "flexDirection", "row");
-    _$insert2(_el$, _$createComponent2(For, {
+    var _el$ = _$createElement2("box"), _el$3 = _$createElement2("box");
+    _$insertNode(_el$, _el$3);
+    _$setProp2(_el$, "flexDirection", "column");
+    _$insert2(_el$, _$createComponent2(Show2, {
+      get when() {
+        return title() !== "";
+      },
+      get children() {
+        var _el$2 = _$createElement2("text");
+        _$insert2(_el$2, title);
+        _$effect2((_p$) => {
+          var _v$ = selected(), _v$2 = props.onToggle;
+          _v$ !== _p$.e && (_p$.e = _$setProp2(_el$2, "fg", _v$, _p$.e));
+          _v$2 !== _p$.t && (_p$.t = _$setProp2(_el$2, "onMouseDown", _v$2, _p$.t));
+          return _p$;
+        }, {
+          e: void 0,
+          t: void 0
+        });
+        return _el$2;
+      }
+    }), _el$3);
+    _$setProp2(_el$3, "flexDirection", "row");
+    _$insert2(_el$3, _$createComponent2(For, {
       get each() {
         return segments();
       },
@@ -602,16 +645,16 @@ function SubagentHeader(props) {
           return index() > 0;
         },
         get children() {
-          var _el$2 = _$createElement2("text");
-          _$insertNode(_el$2, _$createTextNode(` \xB7 `));
-          _$effect2((_$p) => _$setProp2(_el$2, "fg", resolveFg(props.context, SUBDUED_TOKEN, SUBDUED_FALLBACK), _$p));
-          return _el$2;
+          var _el$4 = _$createElement2("text");
+          _$insertNode(_el$4, _$createTextNode(` \xB7 `));
+          _$effect2((_$p) => _$setProp2(_el$4, "fg", resolveFg(props.context, SUBDUED_TOKEN, SUBDUED_FALLBACK), _$p));
+          return _el$4;
         }
       }), (() => {
-        var _el$4 = _$createElement2("text");
-        _$insert2(_el$4, () => segment.text);
-        _$effect2((_$p) => _$setProp2(_el$4, "fg", resolveFg(props.context, segment.token, segment.fallback), _$p));
-        return _el$4;
+        var _el$6 = _$createElement2("text");
+        _$insert2(_el$6, () => segment.text);
+        _$effect2((_$p) => _$setProp2(_el$6, "fg", resolveFg(props.context, segment.token, segment.fallback), _$p));
+        return _el$6;
       })()]
     }));
     return _el$;
@@ -733,35 +776,35 @@ function SubagentPanel(props) {
     return resolveFg(context, marker.token, marker.fallback);
   };
   return (() => {
-    var _el$5 = _$createElement2("box"), _el$7 = _$createElement2("text");
-    _$insertNode(_el$5, _el$7);
-    _$setProp2(_el$5, "flexDirection", "column");
-    _$insert2(_el$5, _$createComponent2(SubagentHeader, {
+    var _el$7 = _$createElement2("box"), _el$9 = _$createElement2("text");
+    _$insertNode(_el$7, _el$9);
+    _$setProp2(_el$7, "flexDirection", "column");
+    _$insert2(_el$7, _$createComponent2(SubagentHeader, {
       context,
       get rows() {
         return rows();
       }
-    }), _el$7);
-    _$insert2(_el$5, _$createComponent2(Show2, {
+    }), _el$9);
+    _$insert2(_el$7, _$createComponent2(Show2, {
       get when() {
         return rows().length > 0;
       },
       get fallback() {
         return (() => {
-          var _el$9 = _$createElement2("text");
-          _$insertNode(_el$9, _$createTextNode(`No subagents in this session`));
-          _$effect2((_$p) => _$setProp2(_el$9, "fg", subdued(), _$p));
-          return _el$9;
+          var _el$1 = _$createElement2("text");
+          _$insertNode(_el$1, _$createTextNode(`No subagents in this session`));
+          _$effect2((_$p) => _$setProp2(_el$1, "fg", subdued(), _$p));
+          return _el$1;
         })();
       },
       get children() {
-        var _el$6 = _$createElement2("box");
-        _$use(setViewport, _el$6);
-        _$setProp2(_el$6, "flexDirection", "column");
-        _$setProp2(_el$6, "flexShrink", 1);
-        _$setProp2(_el$6, "maxHeight", "100%");
-        _$setProp2(_el$6, "overflow", "hidden");
-        _$insert2(_el$6, _$createComponent2(For, {
+        var _el$8 = _$createElement2("box");
+        _$use(setViewport, _el$8);
+        _$setProp2(_el$8, "flexDirection", "column");
+        _$setProp2(_el$8, "flexShrink", 1);
+        _$setProp2(_el$8, "maxHeight", "100%");
+        _$setProp2(_el$8, "overflow", "hidden");
+        _$insert2(_el$8, _$createComponent2(For, {
           get each() {
             return shown();
           },
@@ -775,40 +818,40 @@ function SubagentPanel(props) {
               labelWidth: available
             } : void 0;
             return (() => {
-              var _el$1 = _$createElement2("box");
-              _$setProp2(_el$1, "flexDirection", "column");
-              _$insert2(_el$1, _$createComponent2(For, {
+              var _el$11 = _$createElement2("box");
+              _$setProp2(_el$11, "flexDirection", "column");
+              _$insert2(_el$11, _$createComponent2(For, {
                 get each() {
                   return parts().label;
                 },
                 children: (line) => (() => {
-                  var _el$11 = _$createElement2("text");
-                  _$insert2(_el$11, line);
-                  _$effect2((_$p) => _$setProp2(_el$11, "fg", fg(), _$p));
-                  return _el$11;
+                  var _el$13 = _$createElement2("text");
+                  _$insert2(_el$13, line);
+                  _$effect2((_$p) => _$setProp2(_el$13, "fg", fg(), _$p));
+                  return _el$13;
                 })()
               }), null);
-              _$insert2(_el$1, _$createComponent2(Show2, {
+              _$insert2(_el$11, _$createComponent2(Show2, {
                 get when() {
                   return parts().meta !== "";
                 },
                 get children() {
-                  var _el$10 = _$createElement2("text");
-                  _$insert2(_el$10, () => parts().meta);
-                  _$effect2((_$p) => _$setProp2(_el$10, "fg", subdued(), _$p));
-                  return _el$10;
+                  var _el$12 = _$createElement2("text");
+                  _$insert2(_el$12, () => parts().meta);
+                  _$effect2((_$p) => _$setProp2(_el$12, "fg", subdued(), _$p));
+                  return _el$12;
                 }
               }), null);
-              return _el$1;
+              return _el$11;
             })();
           }
         }));
-        return _el$6;
+        return _el$8;
       }
-    }), _el$7);
-    _$insertNode(_el$7, _$createTextNode(`j/k move \xB7 enter open \xB7 c completed \xB7 f fullscreen \xB7 esc close`));
-    _$effect2((_$p) => _$setProp2(_el$7, "fg", subdued(), _$p));
-    return _el$5;
+    }), _el$9);
+    _$insertNode(_el$9, _$createTextNode(`j/k move \xB7 enter open \xB7 c completed \xB7 f fullscreen \xB7 esc close`));
+    _$effect2((_$p) => _$setProp2(_el$9, "fg", subdued(), _$p));
+    return _el$7;
   })();
 }
 function registerPanel(context, tick) {
@@ -882,8 +925,21 @@ function safeModels2(context) {
     return [];
   }
 }
+var PREFS_KEY2 = "sidebar";
+var SIDEBAR_TITLE = "Subagents";
 function SubagentGlance(props) {
   const [now, setNow] = createSignal2(Date.now());
+  const [prefs, setPrefs] = props.context.storage.store(PREFS_KEY2, {
+    initial: {
+      expanded: true
+    }
+  });
+  const toggle = () => {
+    void setPrefs((draft) => {
+      draft.expanded = !draft.expanded;
+    }).catch(() => {
+    });
+  };
   const sessionID = () => resolveSidebarSession(props.slotSessionID, () => props.context.ui.router.current());
   createEffect2(() => {
     const timer = setInterval(() => setNow(Date.now()), ELAPSED_TICK_MS2);
@@ -914,9 +970,11 @@ function SubagentGlance(props) {
     return resolveFg(props.context, marker.token, marker.fallback);
   };
   const subdued = () => resolveFg(props.context, SUBDUED_TOKEN, SUBDUED_FALLBACK);
+  const expanded = () => prefs.expanded;
+  const open = () => drawsSidebarRows(expanded(), all().length > 0);
   return _$createComponent3(Show3, {
     get when() {
-      return all().length > 0;
+      return open();
     },
     get children() {
       var _el$ = _$createElement3("box");
@@ -927,44 +985,56 @@ function SubagentGlance(props) {
         },
         get rows() {
           return all();
-        }
-      }), null);
-      _$insert3(_el$, _$createComponent3(For2, {
-        get each() {
-          return rows();
         },
-        children: (row) => {
-          const parts = () => rowParts(row, now(), {
-            cost: false,
-            model: false
+        title: SIDEBAR_TITLE,
+        get expanded() {
+          return expanded();
+        },
+        onToggle: toggle
+      }), null);
+      _$insert3(_el$, _$createComponent3(Show3, {
+        get when() {
+          return expanded();
+        },
+        get children() {
+          return _$createComponent3(For2, {
+            get each() {
+              return rows();
+            },
+            children: (row) => {
+              const parts = () => rowParts(row, now(), {
+                cost: false,
+                model: false
+              });
+              return (() => {
+                var _el$2 = _$createElement3("box");
+                _$setProp3(_el$2, "flexDirection", "column");
+                _$insert3(_el$2, _$createComponent3(For2, {
+                  get each() {
+                    return parts().label;
+                  },
+                  children: (line) => (() => {
+                    var _el$4 = _$createElement3("text");
+                    _$insert3(_el$4, line);
+                    _$effect3((_$p) => _$setProp3(_el$4, "fg", fg(row), _$p));
+                    return _el$4;
+                  })()
+                }), null);
+                _$insert3(_el$2, _$createComponent3(Show3, {
+                  get when() {
+                    return parts().meta !== "";
+                  },
+                  get children() {
+                    var _el$3 = _$createElement3("text");
+                    _$insert3(_el$3, () => parts().meta);
+                    _$effect3((_$p) => _$setProp3(_el$3, "fg", subdued(), _$p));
+                    return _el$3;
+                  }
+                }), null);
+                return _el$2;
+              })();
+            }
           });
-          return (() => {
-            var _el$2 = _$createElement3("box");
-            _$setProp3(_el$2, "flexDirection", "column");
-            _$insert3(_el$2, _$createComponent3(For2, {
-              get each() {
-                return parts().label;
-              },
-              children: (line) => (() => {
-                var _el$4 = _$createElement3("text");
-                _$insert3(_el$4, line);
-                _$effect3((_$p) => _$setProp3(_el$4, "fg", fg(row), _$p));
-                return _el$4;
-              })()
-            }), null);
-            _$insert3(_el$2, _$createComponent3(Show3, {
-              get when() {
-                return parts().meta !== "";
-              },
-              get children() {
-                var _el$3 = _$createElement3("text");
-                _$insert3(_el$3, () => parts().meta);
-                _$effect3((_$p) => _$setProp3(_el$3, "fg", subdued(), _$p));
-                return _el$3;
-              }
-            }), null);
-            return _el$2;
-          })();
         }
       }), null);
       return _el$;
@@ -1006,13 +1076,6 @@ function safeStatus(context, sessionID) {
     return void 0;
   }
 }
-function safeList4(context) {
-  try {
-    return context.data.session.list() ?? [];
-  } catch {
-    return [];
-  }
-}
 function safeModels3(context) {
   try {
     return context.data.location.model.list() ?? [];
@@ -1020,37 +1083,30 @@ function safeModels3(context) {
     return [];
   }
 }
-function currentSession(context) {
+var EXECUTION_EVENTS = ["session.execution.succeeded", "session.execution.failed", "session.execution.interrupted"];
+function announceExecution(context, seen, type, event) {
+  const outcome = executionOutcome(type);
+  if (outcome === void 0) return;
+  const sessionID = event?.data?.sessionID;
+  if (!sessionID) return;
   try {
-    const route = context.ui.router.current();
-    return route.type === "session" ? route.sessionID : void 0;
+    const record = safeGet(context, sessionID);
+    if (!record) return;
+    if (!isSubagentSession(record)) return;
+    if (!seenExecution(seen, sessionID, event?.id)) return;
+    void context.attention.notify({
+      title: rowLabel(record),
+      message: finishedMessage(finishedRow(sessionID, record, outcome, 1), Date.now()),
+      sound: {
+        name: "subagent_done",
+        when: "blurred"
+      },
+      notification: {
+        when: "blurred"
+      }
+    }).catch(() => {
+    });
   } catch {
-    return void 0;
-  }
-}
-function announceFinished(context, tracker, sessionID, now) {
-  let finished;
-  try {
-    finished = tracker.update(collectSubagents(safeList4(context), sessionID));
-  } catch {
-    return;
-  }
-  for (const row of finished) {
-    try {
-      void context.attention.notify({
-        title: row.label,
-        message: finishedMessage(row, now),
-        sound: {
-          name: "subagent_done",
-          when: "blurred"
-        },
-        notification: {
-          when: "blurred"
-        }
-      }).catch(() => {
-      });
-    } catch {
-    }
   }
 }
 function SubagentStatus(props) {
@@ -1145,17 +1201,20 @@ var tui_default = Plugin.define({
   setup(context) {
     const [tick, setTick] = createSignal3(0);
     let lastRefreshAt = 0;
-    const tracker = createCompletionTracker();
+    const seenExecutions = /* @__PURE__ */ new Map();
     const requestRefresh = () => {
       const stamp = Date.now();
       if (stamp - lastRefreshAt < REFRESH_COALESCE_MS) return;
       lastRefreshAt = stamp;
       setTick((value) => value + 1);
-      const sessionID = currentSession(context);
-      if (sessionID === void 0) return;
-      announceFinished(context, tracker, sessionID, stamp);
     };
     const stopEvents = context.data.listen(requestRefresh);
+    const stopExecutions = EXECUTION_EVENTS.map((type) => context.data.on(type, (event) => {
+      try {
+        announceExecution(context, seenExecutions, type, event);
+      } catch {
+      }
+    }));
     try {
       void context.data.location.model.sync().catch(() => {
       });
@@ -1179,6 +1238,7 @@ var tui_default = Plugin.define({
     });
     return () => {
       stopEvents?.();
+      for (const stop of stopExecutions) stop?.();
       release?.();
       releasePanel?.();
       releaseFooter?.();

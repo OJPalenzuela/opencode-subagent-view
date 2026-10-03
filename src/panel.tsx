@@ -19,6 +19,7 @@ import {
   collectSubagents,
   counts,
   headerSegments,
+  headerTitle,
   LABEL_COLUMN,
   orderRows,
   rowCapacity,
@@ -113,21 +114,36 @@ function safeModels(context: Context): ModelInfoLike[] {
 export function SubagentHeader(props: {
   readonly context: Context;
   readonly rows: readonly SubagentRow[];
+  /** Omitted by the panel: a title line only makes sense where there is a toggle. */
+  readonly title?: string;
+  readonly expanded?: boolean;
+  readonly onToggle?: () => void;
 }) {
   const segments = createMemo(() => headerSegments(counts(props.rows)));
+  const title = () => headerTitle(props.title ?? "", props.expanded !== false);
+  const selected = () => resolveFg(props.context, SELECTED_TOKEN, SELECTED_FALLBACK);
 
   return (
-    <box flexDirection="row">
-      <For each={segments()}>
-        {(segment, index) => (
-          <>
-            <Show when={index() > 0}>
-              <text fg={resolveFg(props.context, SUBDUED_TOKEN, SUBDUED_FALLBACK)}> · </text>
-            </Show>
-            <text fg={resolveFg(props.context, segment.token, segment.fallback)}>{segment.text}</text>
-          </>
-        )}
-      </For>
+    <box flexDirection="column">
+      <Show when={title() !== ""}>
+        {/* `onMouseDown`, not a click handler: the sidebar slot gets no keyboard
+            focus, so the press is the only gesture that reaches it. */}
+        <text fg={selected()} onMouseDown={props.onToggle}>
+          {title()}
+        </text>
+      </Show>
+      <box flexDirection="row">
+        <For each={segments()}>
+          {(segment, index) => (
+            <>
+              <Show when={index() > 0}>
+                <text fg={resolveFg(props.context, SUBDUED_TOKEN, SUBDUED_FALLBACK)}> · </text>
+              </Show>
+              <text fg={resolveFg(props.context, segment.token, segment.fallback)}>{segment.text}</text>
+            </>
+          )}
+        </For>
+      </box>
     </box>
   );
 }

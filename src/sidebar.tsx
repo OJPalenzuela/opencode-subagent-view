@@ -26,6 +26,7 @@ import type { ModelInfoLike } from "./context.js";
 import { SubagentHeader } from "./panel.js";
 import {
   collectSubagents,
+  drawsSidebarRows,
   rowParts,
   stateOf,
   topRows,
@@ -111,6 +112,15 @@ function safeModels(context: Context): ModelInfoLike[] {
   }
 }
 
+const PREFS_KEY = "sidebar";
+/** Expanded by default: a collapsed widget reads as a broken one. */
+const SIDEBAR_TITLE = "Subagents";
+
+interface SidebarPrefs {
+  // Not `readonly`: `setPrefs` mutates a draft, so a readonly field rejects it.
+  expanded: boolean;
+}
+
 function SubagentGlance(props: {
   readonly context: Context;
   /** The slot's declared id: guaranteed by the type, not by the runtime. */
@@ -118,6 +128,16 @@ function SubagentGlance(props: {
   readonly tick: () => number;
 }) {
   const [now, setNow] = createSignal(Date.now());
+  // Same shape and key style as the panel's own prefs: persisted, so a collapse
+  // survives a restart.
+  const [prefs, setPrefs] = props.context.storage.store<SidebarPrefs>(PREFS_KEY, {
+    initial: { expanded: true },
+  });
+  const toggle = () => {
+    void setPrefs((draft) => {
+      draft.expanded = !draft.expanded;
+    }).catch(() => {});
+  };
 
   // Deliberately a plain call and not a `createMemo`: the SDK documents
   // `panel.current()` and `tabs.list()` as "reactive when read in a Solid
@@ -187,31 +207,42 @@ function SubagentGlance(props: {
 
   const subdued = () => resolveFg(props.context, SUBDUED_TOKEN, SUBDUED_FALLBACK);
 
-  // No subagents means no widget: a placeholder here would leave a permanent
-  // empty block in every session that has never spawned one.
+  // No subagents means no widget at all — not even a collapsed one, which in a
+  // session that never spawned anything is indistinguishable from a broken
+  // widget. With rows present the header always draws; only the rows collapse.
+  const expanded = () => prefs.expanded;
+  const open = () => drawsSidebarRows(expanded(), all().length > 0);
+
   return (
-    <Show when={all().length > 0}>
+    <Show when={open()}>
       <box flexDirection="column">
-        <SubagentHeader context={props.context} rows={all()} />
-        <For each={rows()}>
-          {(row: SubagentRow) => {
-            // `{ cost: false }` is the whole difference from a panel row.
-            // `cost: false` and `model: false`: the sidebar is the narrow surface, so it
-// spends its two label lines on the task and its one meta line on the metrics.
-const parts = () => rowParts(row, now(), { cost: false, model: false });
-            return (
-              <box flexDirection="column">
-                {/* One node per wrapped label line, all in the row's color. */}
-                <For each={parts().label}>
-                  {(line) => <text fg={fg(row)}>{line}</text>}
-                </For>
-                <Show when={parts().meta !== ""}>
-                  <text fg={subdued()}>{parts().meta}</text>
-                </Show>
-              </box>
-            );
-          }}
-        </For>
+        <SubagentHeader
+          context={props.context}
+          rows={all()}
+          title={SIDEBAR_TITLE}
+          expanded={expanded()}
+          onToggle={toggle}
+        />
+        <Show when={expanded()}>
+          <For each={rows()}>
+            {(row: SubagentRow) => {
+              // `cost: false` and `model: false`: the sidebar is the narrow surface, so it
+              // spends its two label lines on the task and its one meta line on the metrics.
+              const parts = () => rowParts(row, now(), { cost: false, model: false });
+              return (
+                <box flexDirection="column">
+                  {/* One node per wrapped label line, all in the row's color. */}
+                  <For each={parts().label}>
+                    {(line) => <text fg={fg(row)}>{line}</text>}
+                  </For>
+                  <Show when={parts().meta !== ""}>
+                    <text fg={subdued()}>{parts().meta}</text>
+                  </Show>
+                </box>
+              );
+            }}
+          </For>
+        </Show>
       </box>
     </Show>
   );

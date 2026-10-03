@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   collectSubagents,
   counts,
+  drawsSidebarRows,
   footerText,
   headerLine,
   headerSegments,
+  headerTitle,
   orderRows,
   rowCapacity,
   rowParts,
@@ -401,6 +403,44 @@ describe("wrapLabel", () => {
     const lines = wrapLabel("héllo wörld this is a fairly long label", W, 2, I);
     expect(lines.join("")).toContain("héllo");
     expect(lines.every((line) => !line.includes("�"))).toBe(true);
+  });
+});
+
+describe("headerTitle", () => {
+  it("shows the expanded arrow when the title is open", () => {
+    expect(headerTitle("Subagents", true)).toBe("▾ Subagents");
+  });
+
+  it("shows the collapsed arrow when the title is closed", () => {
+    expect(headerTitle("Subagents", false)).toBe("▸ Subagents");
+  });
+
+  it("renders nothing but the trimmed title when there is no title", () => {
+    expect(headerTitle("", true)).toBe("");
+    expect(headerTitle("   ", false)).toBe("");
+  });
+
+  it("puts the arrow and the title on one line, separated by a single space", () => {
+    for (const expanded of [true, false]) {
+      const line = headerTitle("Subagents", expanded);
+      expect(line.split(" ")).toHaveLength(2);
+      expect(Array.from(line).length).toBe(Array.from("Subagents").length + 2);
+    }
+  });
+});
+
+describe("drawsSidebarRows", () => {
+  it("draws the rows only when expanded and there is something to draw", () => {
+    expect(drawsSidebarRows(true, true)).toBe(true);
+  });
+
+  it("draws nothing when collapsed, however many subagents there are", () => {
+    expect(drawsSidebarRows(false, true)).toBe(false);
+    expect(drawsSidebarRows(false, false)).toBe(false);
+  });
+
+  it("draws nothing when there are no subagents, even expanded", () => {
+    expect(drawsSidebarRows(true, false)).toBe(false);
   });
 });
 
