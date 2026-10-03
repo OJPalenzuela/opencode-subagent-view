@@ -469,16 +469,17 @@ export function headerTitle(title: string, expanded: boolean): string {
 }
 
 /**
- * Whether the sidebar draws its subagent rows: only when the user has it open
- * *and* there is something to show.
+ * Whether the sidebar widget draws at all: whenever the current root has any
+ * subagent, collapsed or not.
  *
- * Both halves matter, and in this order. With no subagents there is no widget at
- * all rather than a collapsed one — a collapsed header in a session that never
- * spawned anything is indistinguishable from the widget being broken, which is
- * exactly the confusion this sidebar has already caused.
+ * Only "is there anything to report" decides this. Whether the rows are expanded
+ * must NOT also gate it: a collapsed widget that hides its own header has no
+ * arrow left to expand it again, so one persisted `expanded: false` was enough
+ * to make the widget unreachable forever. The collapse gate belongs to the rows,
+ * inside the widget, where the header stays put.
  */
-export function drawsSidebarRows(expanded: boolean, hasRows: boolean): boolean {
-  return expanded && hasRows;
+export function drawsSidebarWidget(hasRows: boolean): boolean {
+  return hasRows;
 }
 
 /** Header counts as three separately colored segments: `● 2 run`, `✓ 1 done`, `✕ 0 err`. */

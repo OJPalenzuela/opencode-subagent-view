@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   collectSubagents,
   counts,
-  drawsSidebarRows,
+  drawsSidebarWidget,
   footerText,
   headerLine,
   headerSegments,
@@ -429,18 +429,13 @@ describe("headerTitle", () => {
   });
 });
 
-describe("drawsSidebarRows", () => {
-  it("draws the rows only when expanded and there is something to draw", () => {
-    expect(drawsSidebarRows(true, true)).toBe(true);
+describe("drawsSidebarWidget", () => {
+  it("draws whenever the root has a subagent, collapsed or not", () => {
+    expect(drawsSidebarWidget(true)).toBe(true);
   });
 
-  it("draws nothing when collapsed, however many subagents there are", () => {
-    expect(drawsSidebarRows(false, true)).toBe(false);
-    expect(drawsSidebarRows(false, false)).toBe(false);
-  });
-
-  it("draws nothing when there are no subagents, even expanded", () => {
-    expect(drawsSidebarRows(true, false)).toBe(false);
+  it("draws nothing when the root has no subagents at all", () => {
+    expect(drawsSidebarWidget(false)).toBe(false);
   });
 });
 

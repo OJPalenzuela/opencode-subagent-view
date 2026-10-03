@@ -493,8 +493,8 @@ function headerTitle(title, expanded) {
   if (text === "") return "";
   return `${expanded ? TITLE_EXPANDED : TITLE_COLLAPSED} ${text}`;
 }
-function drawsSidebarRows(expanded, hasRows) {
-  return expanded && hasRows;
+function drawsSidebarWidget(hasRows) {
+  return hasRows;
 }
 function headerSegments(total) {
   return [
@@ -971,7 +971,7 @@ function SubagentGlance(props) {
   };
   const subdued = () => resolveFg(props.context, SUBDUED_TOKEN, SUBDUED_FALLBACK);
   const expanded = () => prefs.expanded;
-  const open = () => drawsSidebarRows(expanded(), all().length > 0);
+  const open = () => drawsSidebarWidget(all().length > 0);
   return _$createComponent3(Show3, {
     get when() {
       return open();

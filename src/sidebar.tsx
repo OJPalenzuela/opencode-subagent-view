@@ -26,7 +26,7 @@ import type { ModelInfoLike } from "./context.js";
 import { SubagentHeader } from "./panel.js";
 import {
   collectSubagents,
-  drawsSidebarRows,
+  drawsSidebarWidget,
   rowParts,
   stateOf,
   topRows,
@@ -211,7 +211,10 @@ function SubagentGlance(props: {
   // session that never spawned anything is indistinguishable from a broken
   // widget. With rows present the header always draws; only the rows collapse.
   const expanded = () => prefs.expanded;
-  const open = () => drawsSidebarRows(expanded(), all().length > 0);
+  // The widget's own gate is "is there anything to report" only. Collapsing hides
+  // the rows and nothing else: hiding the header too would strand a persisted
+  // `expanded: false` with no arrow left to click.
+  const open = () => drawsSidebarWidget(all().length > 0);
 
   return (
     <Show when={open()}>
